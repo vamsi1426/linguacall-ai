@@ -10,8 +10,8 @@ import 'package:flutter/foundation.dart';
 /// ```text
 /// flutter build apk --release \
 ///   --dart-define=LINGUA_PROFILE=prod \
-///   --dart-define=LINGUA_SIGNALING_URL=https://your-signaling.onrender.com \
-///   --dart-define=LINGUA_TRANSLATE_WS=wss://your-backend.onrender.com/ws/translate-stream
+///   --dart-define=LINGUA_SIGNALING_URL=https://linguacall-signal.onrender.com \
+///   --dart-define=LINGUA_TRANSLATE_WS=wss://linguacall-api.onrender.com/ws/translate-stream
 /// ```
 ///
 /// Overrides always win: if `LINGUA_SIGNALING_URL` or `LINGUA_TRANSLATE_WS` is non-empty,
@@ -32,12 +32,14 @@ class AppConfig {
   static const String _defaultSignalingLocal = 'http://127.0.0.1:3000';
   static const String _defaultTranslateWsLocal = 'ws://127.0.0.1:8000/ws/translate-stream';
 
-  /// Placeholder hosts for production — replace via `--dart-define` or your CI.
+  /// Production defaults (deployed Render services).
+  ///
+  /// You can still override these with `--dart-define`.
   static const String _prodSignalingPlaceholder =
-      String.fromEnvironment('LINGUA_SIGNALING_DEFAULT', defaultValue: 'https://your-signaling.onrender.com');
+      String.fromEnvironment('LINGUA_SIGNALING_DEFAULT', defaultValue: 'https://linguacall-signal.onrender.com');
   static const String _prodTranslateWsPlaceholder = String.fromEnvironment(
     'LINGUA_TRANSLATE_WS_DEFAULT',
-    defaultValue: 'wss://your-backend.onrender.com/ws/translate-stream',
+    defaultValue: 'wss://linguacall-api.onrender.com/ws/translate-stream',
   );
 
   /// Socket.io / HTTP signaling (Node server). Use **https://** on Render.

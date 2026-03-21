@@ -28,6 +28,11 @@ class SignalingService extends ChangeNotifier {
     socket?.dispose();
     socket = IO.io(signalingUrl, <String, dynamic>{
       'transports': <String>['websocket'],
+      'reconnection': true,
+      'reconnectionAttempts': 20,
+      'reconnectionDelay': 1000,
+      'reconnectionDelayMax': 5000,
+      'timeout': 10000,
       'autoConnect': true,
     });
 
@@ -88,6 +93,18 @@ class SignalingService extends ChangeNotifier {
 
     socket!.on('connect_error', (dynamic data) {
       debugPrint('Signaling connect error: $data');
+    });
+    socket!.on('connect_timeout', (dynamic data) {
+      debugPrint('Signaling connect timeout: $data');
+    });
+    socket!.on('reconnect_attempt', (dynamic attempt) {
+      debugPrint('Signaling reconnect attempt: $attempt');
+    });
+    socket!.on('reconnect_error', (dynamic data) {
+      debugPrint('Signaling reconnect error: $data');
+    });
+    socket!.on('reconnect_failed', (dynamic data) {
+      debugPrint('Signaling reconnect failed: $data');
     });
   }
 
