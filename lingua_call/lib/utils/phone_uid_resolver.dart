@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 String digitsOnly(String s) => s.replaceAll(RegExp(r'\D'), '');
 
 /// Resolves a Firestore user id from a phone string stored in [users.phone].
+/// Realtime calls use this UID for Socket.io + WebRTC on any network (same as login identity).
 Future<String?> findUidByPhone(String phone) async {
   final raw = phone.trim();
   if (raw.isEmpty) return null;

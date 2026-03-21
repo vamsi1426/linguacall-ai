@@ -1,0 +1,31 @@
+# Render Blueprint — deploy both services from this monorepo.
+# Dashboard: New → Blueprint → connect repo → apply this file.
+#
+# Set secrets in Render for the Python service:
+#   - GOOGLE_APPLICATION_CREDENTIALS (if you upload a file via shell) OR
+#   - GOOGLE_CREDENTIALS_JSON (paste full service-account JSON as a secret)
+#
+# Flutter release builds should pass:
+#   --dart-define=LINGUA_PROFILE=prod
+#   --dart-define=LINGUA_SIGNALING_URL=https://<signaling-service>.onrender.com
+#   --dart-define=LINGUA_TRANSLATE_WS=wss://<api-service>.onrender.com/ws/translate-stream
+
+services:
+  - type: web
+    name: linguacall-api
+    env: python
+    rootDir: ai_backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: UVICORN_RELOAD
+        value: "0"
+
+  - type: web
+    name: linguacall-signaling
+    env: node
+    rootDir: backend_signaling
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health

@@ -1,33 +1,20 @@
 import os
-import json
-import asyncio
+from pathlib import Path
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
+from google_env import configure_google_application_credentials
+
 # Import the strict production websocket pipeline
 from translate_stream import translate_stream_websocket
 
-def _ensure_google_credentials() -> None:
-    """
-    Make local runs robust: if GOOGLE_APPLICATION_CREDENTIALS is missing or points
-    to a bad path, fall back to ai_backend/google_key.json.
-    """
-    configured = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
-    if configured and os.path.exists(configured):
-        return
+# Load .env from ai_backend/ when present (local dev)
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
-    fallback = os.path.join(os.path.dirname(__file__), "google_key.json")
-    if os.path.exists(fallback):
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = fallback
-        print(f"[startup] Using GOOGLE_APPLICATION_CREDENTIALS={fallback}")
-    else:
-        print(
-            "[startup] WARNING: google_key.json not found and GOOGLE_APPLICATION_CREDENTIALS is invalid."
-        )
-
-
-_ensure_google_credentials()
+configure_google_application_credentials()
 
 app = FastAPI(title="LinguaCall AI Backend", description="Real-time translation stream")
 
@@ -94,4 +81,6 @@ async def websocket_translate_stream(websocket: WebSocket):
     await translate_stream_websocket(websocket)
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", "8000"))
+    reload = os.environ.get("UVICORN_RELOAD", "1") == "1"
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=reload)

@@ -8,7 +8,7 @@ const { Server } = require('socket.io');
 const PORT = Number(process.env.PORT || 3000);
 
 const app = express();
-app.use(cors({ origin: true }));
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'] }));
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'linguacall-signaling' });
 });
@@ -16,7 +16,7 @@ app.get('/health', (_req, res) => {
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: true, methods: ['GET', 'POST'] },
+  cors: { origin: '*', methods: ['GET', 'POST'], credentials: false },
   transports: ['websocket', 'polling'],
 });
 
@@ -141,6 +141,6 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`LinguaCall signaling listening on http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`LinguaCall signaling on 0.0.0.0:${PORT} (PORT from env)`);
 });

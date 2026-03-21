@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import os
 import queue
 import threading
 import time
@@ -16,23 +15,9 @@ from google.cloud import texttospeech
 from google.cloud.speech_v1.services.speech.client import SpeechClient as GapicSpeechClient
 
 from audio_utils import pcm16le_to_wav_bytes
+from google_env import configure_google_application_credentials
 
 logger = logging.getLogger("linguacall.translate_stream")
-
-
-def _ensure_google_credentials() -> None:
-    configured = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
-    if configured and os.path.exists(configured):
-        return
-
-    fallback = os.path.join(os.path.dirname(__file__), "google_key.json")
-    if os.path.exists(fallback):
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = fallback
-        logger.info("Using fallback GOOGLE_APPLICATION_CREDENTIALS=%s", fallback)
-    else:
-        logger.warning(
-            "GOOGLE_APPLICATION_CREDENTIALS is invalid and fallback google_key.json was not found."
-        )
 
 
 def _normalize_lang_code(code: Optional[str]) -> str:
@@ -105,7 +90,7 @@ def _run_translation_worker(
     if not config.enabled:
         logger.info("Translation disabled; worker will drain audio only.")
 
-    _ensure_google_credentials()
+    configure_google_application_credentials()
 
     speech_client = speech.SpeechClient()
     translate_client = translate.Client()
