@@ -1,0 +1,138 @@
+﻿Running Gradle task 'assembleRelease'...                        
+flutter : Warning: Flutter support 
+for your project's Gradle version 
+(8.4.0) will soon be dropped. 
+Please upgrade your Gradle version 
+to a version of at least 8.7.0 
+soon.
+At line:1 char:1
++ flutter build apk 2>&1 | 
+Out-File -FilePath error.txt 
+-Encoding utf8
++ ~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotS 
+   pecified: (Warning: Flutte...a  
+  st 8.7.0 soon.:String) [], Rem   
+ oteException
+    + FullyQualifiedErrorId : Nati 
+   veCommandError
+ 
+Alternatively, use the flag "--andr
+oid-skip-build-dependency-validatio
+n" to bypass this check.
+
+Potential fix: Your project's 
+gradle version is typically 
+defined in the gradle wrapper 
+file. By default, this can be 
+found at D:\ai voice\lingua_call\an
+droid/gradle/wrapper/gradle-wrapper
+.properties. 
+For more information, see https://d
+ocs.gradle.org/current/userguide/gr
+adle_wrapper.html.
+
+Warning: Flutter support for your 
+project's Android Gradle Plugin 
+version (Android Gradle Plugin 
+version 8.1.2) will soon be 
+dropped. Please upgrade your 
+Android Gradle Plugin version to a 
+version of at least Android Gradle 
+Plugin version 8.6.0 soon.
+Alternatively, use the flag "--andr
+oid-skip-build-dependency-validatio
+n" to bypass this check.
+
+Potential fix: Your project's AGP 
+version is typically defined in 
+the plugins block of the 
+`settings.gradle` file (D:\ai voice
+\lingua_call\android/settings.gradl
+e), by a plugin with the id of 
+com.android.application. 
+If you don't see a plugins block, 
+your project was likely created 
+with an older template version. In 
+this case it is most likely 
+defined in the top-level 
+build.gradle file (D:\ai voice\ling
+ua_call\android/build.gradle) by 
+the following line in the 
+dependencies block of the 
+buildscript: "classpath 'com.androi
+d.tools.build:gradle:<version>'".
+
+Warning: Flutter support for your 
+project's Kotlin version (1.9.20) 
+will soon be dropped. Please 
+upgrade your Kotlin version to a 
+version of at least 2.1.0 soon.
+Alternatively, use the flag "--andr
+oid-skip-build-dependency-validatio
+n" to bypass this check.
+
+Potential fix: Your project's KGP 
+version is typically defined in 
+the plugins block of the 
+`settings.gradle` file (D:\ai voice
+\lingua_call\android/settings.gradl
+e), by a plugin with the id of 
+org.jetbrains.kotlin.android. 
+If you don't see a plugins block, 
+your project was likely created 
+with an older template version, in 
+which case it is most likely 
+defined in the top-level 
+build.gradle file (D:\ai voice\ling
+ua_call\android/build.gradle) by 
+the ext.kotlin_version property.
+
+
+FAILURE: Build failed with an 
+exception.
+
+* What went wrong:
+A problem occurred configuring 
+project ':flutter_webrtc'.
+> java.util.concurrent.ExecutionExc
+eption: 
+org.gradle.api.GradleException: 
+Failed to create Jar file 
+C:\Users\DELL PRECISION 5510\.gradl
+e\caches\jars-9\74539427551442684fa
+df7f55a279c59\gradle-7.1.1.jar.
+> Failed to notify project 
+evaluation listener.
+   > 
+java.lang.NullPointerException (no 
+error message)
+   > 
+java.lang.NullPointerException (no 
+error message)
+
+* Try:
+> Run with --stacktrace option to 
+get the stack trace.
+> Run with --info or --debug 
+option to get more log output.
+> Run with --scan to get full 
+insights.
+> Get more help at 
+https://help.gradle.org.
+
+BUILD FAILED in 37s
+Running Gradle task 'assembleRelease'...                           38.0s
+
+ΓöîΓöÇ Flutter Fix ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÉ
+Γöé [!] Starting AGP 9+, only the new DSL interface will be read. This results in a build failure    Γöé
+Γöé when applying the Flutter Gradle plugin at D:\ai voice\lingua_call\android\app\build.gradle.kts. Γöé
+Γöé                                                                                                  Γöé
+Γöé To resolve this update flutter or opt out of `android.newDsl`. For instructions on how to opt    Γöé
+Γöé out, see: https://docs.flutter.dev/release/breaking-changes/migrate-to-agp-9                     Γöé
+Γöé                                                                                                  Γöé
+Γöé If you are not upgrading to AGP 9+, run `flutter analyze --suggestions` to check for             Γöé
+Γöé incompatible dependencies.                                                                       Γöé
+ΓööΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÿ
+Gradle task assembleRelease failed 
+with exit code 1

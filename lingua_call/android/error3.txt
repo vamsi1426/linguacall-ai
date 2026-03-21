@@ -1,0 +1,20 @@
+﻿.\gradlew.bat : 
+At line:1 char:1
++ .\gradlew.bat assembleDebug 2>&1 | Out-File -FilePath error3.txt -Enc 
+...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteExcepti 
+   on
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Could not write cache value to 'C:\Users\DELL PRECISION 
+5510\.gradle\daemon\8.4\registry.bin'.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.

@@ -1,0 +1,14 @@
+// Force compileSdk 36 on all Android modules (Flutter plugins: path_provider_android, etc.)
+subprojects { subproject ->
+    subproject.afterEvaluate {
+        def androidExt = subproject.extensions.findByName("android")
+        if (androidExt == null) {
+            return
+        }
+        try {
+            androidExt.compileSdk = 36
+        } catch (Exception ignored) {
+            // Non-Android subprojects
+        }
+    }
+}

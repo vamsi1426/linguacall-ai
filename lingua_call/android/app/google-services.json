@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "80990778642",
+    "project_id": "linguacall-ai-4bfd5",
+    "storage_bucket": "linguacall-ai-4bfd5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:80990778642:android:86f23eae4cb3f3b33eafcb",
+        "android_client_info": {
+          "package_name": "com.linguacall.linguacall"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCkX1NT26Iz0AKz5baPG7zhAJ-s5TIwirQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
