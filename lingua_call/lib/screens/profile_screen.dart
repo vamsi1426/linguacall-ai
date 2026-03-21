@@ -110,7 +110,7 @@ class _UserHeaderCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       phone,
-                      style: TextStyle(color: AppTheme.textMuted),
+                      style: const TextStyle(color: AppTheme.textMuted),
                     ),
                   ],
                 ),
@@ -165,7 +165,7 @@ class _MetaChip extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(
+            style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.w800,
               fontSize: 12,

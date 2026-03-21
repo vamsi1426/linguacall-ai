@@ -84,15 +84,15 @@ class _EmptyContacts extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return const Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(24),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.person_add, size: 64, color: AppTheme.secondaryColor),
-            const SizedBox(height: 16),
-            const Text(
+            SizedBox(height: 16),
+            Text(
               'No contacts yet',
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -101,7 +101,7 @@ class _EmptyContacts extends StatelessWidget {
                 fontWeight: FontWeight.w800,
               ),
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             Text(
               'Use the Dialpad to save numbers into Firestore.',
               style: TextStyle(color: AppTheme.textMuted),
@@ -163,7 +163,7 @@ class GlassContactCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   phone,
-                  style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
                 ),
               ],
             ),
