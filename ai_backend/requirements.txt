@@ -1,9 +1,8 @@
-protobuf==3.20.3
-google-api-core==2.11.0
-google-cloud-speech==2.21.0
-google-cloud-texttospeech==2.14.1
+# Top-level deps only — protobuf, grpcio, google-api-core, etc. come from google-cloud-*.
 fastapi==0.103.1
 uvicorn==0.23.2
+google-cloud-speech==2.21.0
 google-cloud-translate==3.12.0
+google-cloud-texttospeech==2.14.1
 websockets==11.0.3
 python-dotenv==1.0.0
