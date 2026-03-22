@@ -232,7 +232,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                                   ? (err.length > 120 ? '${err.substring(0, 117)}...' : err)
                                   : translation.isStreaming
                                       ? 'Translating… (this phone speaker)'
-                                      : 'Idle — backend must be reachable';
+                                      : translation.isTranslationConnecting
+                                          ? 'Connecting to translation server…'
+                                          : 'Idle — backend must be reachable';
                               return Text(
                                 line,
                                 style: TextStyle(

@@ -402,10 +402,10 @@ async def translate_stream_websocket(websocket: WebSocket) -> None:
         pcm_stats = {"received": 0}
 
         async def _warn_no_pcm_soon() -> None:
-            await asyncio.sleep(5.0)
+            await asyncio.sleep(12.0)
             if pcm_stats["received"] == 0 and not stop_event.is_set():
                 logger.warning(
-                    "No PCM bytes received from client after 5s (session still open; check client mic)",
+                    "No PCM bytes received from client after 12s (session still open; check client mic)",
                 )
 
         no_pcm_warn_task = asyncio.create_task(_warn_no_pcm_soon())
@@ -416,6 +416,8 @@ async def translate_stream_websocket(websocket: WebSocket) -> None:
             if stop_event.is_set():
                 break
             pcm_stats["received"] += 1
+            if pcm_stats["received"] == 1 and no_pcm_warn_task is not None and not no_pcm_warn_task.done():
+                no_pcm_warn_task.cancel()
             n = pcm_stats["received"]
             if n <= 3 or n % 100 == 0:
                 logger.info("Received PCM chunk #%s size=%s", n, len(pcm_chunk))

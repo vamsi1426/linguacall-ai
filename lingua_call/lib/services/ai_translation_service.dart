@@ -34,6 +34,10 @@ class AITranslationService extends ChangeNotifier {
   bool _isStreaming = false;
   bool get isStreaming => _isStreaming;
 
+  /// True while opening websocket / setting up mic (before [_isStreaming] is true).
+  bool _translationConnecting = false;
+  bool get isTranslationConnecting => _translationConnecting;
+
   String? _lastError;
   String? get lastError => _lastError;
 
@@ -116,6 +120,10 @@ class AITranslationService extends ChangeNotifier {
 
     await stopTranslationStream();
 
+    _translationConnecting = true;
+    notifyListeners();
+
+    try {
     _lastError = null;
     _sourceLang = sourceLang;
     _targetLang = targetLang;
@@ -323,6 +331,10 @@ class AITranslationService extends ChangeNotifier {
       await stopTranslationStream();
       rethrow;
     }
+    } finally {
+      _translationConnecting = false;
+      notifyListeners();
+    }
   }
 
   Future<void> stopTranslationStream({bool notify = true}) async {
@@ -331,6 +343,7 @@ class AITranslationService extends ChangeNotifier {
     _pcmWatchdog?.cancel();
     _pcmWatchdog = null;
 
+    _translationConnecting = false;
     _isStreaming = false;
     if (notify) {
       notifyListeners();

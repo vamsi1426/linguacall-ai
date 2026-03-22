@@ -288,8 +288,11 @@ class _VoiceCallScreenState extends State<VoiceCallScreen> {
                                   line = 'Translation OFF — turn the switch on to translate';
                                 } else if (translation.isStreaming) {
                                   line = 'Translating… (remote peer hears translated audio)';
+                                } else if (translation.isTranslationConnecting) {
+                                  line =
+                                      'Connecting to translation server… (first connect can take 30–60s after cold start)';
                                 } else {
-                                  line = 'Translation OFF or backend unreachable';
+                                  line = 'Translation idle — check toggle or error above';
                                 }
                               } else if (translation.isStreaming) {
                                 line = 'Translating… (listen on this phone’s speaker)';
