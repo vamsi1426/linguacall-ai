@@ -13,8 +13,6 @@ from google.cloud import speech
 from google.cloud import translate_v2 as translate
 from google.cloud import texttospeech
 from google.api_core.exceptions import OutOfRange
-from google.cloud.speech_v1.services.speech.client import SpeechClient as GapicSpeechClient
-
 from audio_utils import pcm16le_to_wav_bytes
 from google_env import configure_google_application_credentials
 
@@ -120,7 +118,6 @@ def _run_translation_worker(
         language_code=config.source_lang,
         audio_channel_count=1,
         enable_automatic_punctuation=True,
-        # model can be tuned for latency; default is generally safe.
     )
     streaming_config = speech.StreamingRecognitionConfig(
         config=recognition_config,
@@ -142,7 +139,7 @@ def _run_translation_worker(
     )
 
     wav_out_count = 0
-    stt_trace = {"first_transcript": False, "response_count": 0}
+    stt_raw_logged = 0
 
     def safe_send(wav_bytes: bytes) -> None:
         nonlocal wav_out_count
@@ -163,14 +160,57 @@ def _run_translation_worker(
 
         fut.add_done_callback(_log_done)
 
+    def log_raw_stt_response(response: speech.StreamingRecognizeResponse, idx: int) -> None:
+        """Explain why Render logs show PCM in but no TTS out (STT silence vs errors vs empty text)."""
+        nonlocal stt_raw_logged
+        if stt_raw_logged >= 80:
+            return
+        stt_raw_logged += 1
+        try:
+            err = response.error
+            if err and err.code != 0:
+                logger.warning(
+                    "STT response #%s RPC error code=%s message=%s",
+                    idx,
+                    err.code,
+                    err.message,
+                )
+                return
+        except Exception:
+            pass
+        nres = len(response.results)
+        if nres == 0:
+            logger.info(
+                "STT response #%s: 0 results (no speech yet or silence; speech_event_type=%s)",
+                idx,
+                getattr(response, "speech_event_type", None),
+            )
+            return
+        parts = []
+        for i, r in enumerate(response.results):
+            alt = r.alternatives[0].transcript if r.alternatives else ""
+            parts.append(
+                f"[{i}] final={getattr(r, 'is_final', False)!r} "
+                f"stab={getattr(r, 'stability', 0.0):.2f} {alt[:48]!r}"
+            )
+        logger.info("STT response #%s: %s", idx, " | ".join(parts))
+
+    def pick_streaming_result(
+        response: speech.StreamingRecognizeResponse,
+    ) -> Optional[speech.StreamingRecognitionResult]:
+        """Prefer a final hypothesis; otherwise use the first result (matches Google examples)."""
+        if not response.results:
+            return None
+        for r in response.results:
+            if r.is_final and r.alternatives:
+                return r
+        return response.results[0]
+
     def process_response(response: speech.StreamingRecognizeResponse) -> None:
         nonlocal last_sent_at, last_sent_text
 
-        if not response.results:
-            return
-
-        result = response.results[0]
-        if not result.alternatives:
+        result = pick_streaming_result(response)
+        if result is None or not result.alternatives:
             return
 
         transcript = result.alternatives[0].transcript.strip()
@@ -255,13 +295,13 @@ def _run_translation_worker(
 
             try:
                 logger.info("Starting STT streaming session #%s", session_index)
-                responses = GapicSpeechClient.streaming_recognize(
-                    speech_client,
+                responses = speech_client.streaming_recognize(
                     requests=streaming_requests(),
                 )
-                for response in responses:
+                for idx, response in enumerate(responses):
                     if stop_event.is_set():
                         break
+                    log_raw_stt_response(response, idx)
                     process_response(response)
             except OutOfRange as e:
                 if _is_stt_max_stream_duration_error(e):
