@@ -27,7 +27,7 @@ class SignalingService extends ChangeNotifier {
   /// Waits until Socket.io is connected and `register-user` can run, or [timeout] elapses.
   /// Avoids the outgoing-call race where the first frame runs before [onConnect].
   Future<bool> waitForConnection({
-    Duration timeout = const Duration(seconds: 15),
+    Duration timeout = const Duration(seconds: 30),
   }) async {
     if (_isConnected) return true;
 

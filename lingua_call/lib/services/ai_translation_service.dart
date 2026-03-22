@@ -38,12 +38,45 @@ class AITranslationService extends ChangeNotifier {
   String? _sourceLang;
   String? _targetLang;
 
+  /// Last error from [_openTranslationWebSocket] when it returns null.
+  Object? _lastTranslationConnectError;
+
   bool _playLocally = true;
   void Function(Uint8List pcm, int sampleRate)? _onTranslatedPcm;
 
   // Microphone PCM chunking.
   final List<int> _micBuffer = <int>[];
   int get _chunkBytes => (_sampleRate * _chunkDuration.inMilliseconds ~/ 1000) * _bytesPerSample;
+
+  /// Connects to the first reachable translation WebSocket URL with retries per URL.
+  Future<WebSocket?> _openTranslationWebSocket() async {
+    _lastTranslationConnectError = null;
+    Object? lastErr;
+    const delayBetween = Duration(seconds: 2);
+    final timeout = AppConfig.translationWsConnectTimeout;
+    const maxAttempts = AppConfig.translationWsRetries;
+
+    for (final url in AppConfig.translationStreamUrls) {
+      for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          debugPrint(
+            'AITranslationService: connecting to $url '
+            '(attempt $attempt/$maxAttempts, timeout ${timeout.inSeconds}s)',
+          );
+          final ws = await WebSocket.connect(url).timeout(timeout);
+          return ws;
+        } catch (e) {
+          lastErr = e;
+          debugPrint('AITranslationService: connect failed for $url: $e');
+          if (attempt < maxAttempts) {
+            await Future<void>.delayed(delayBetween);
+          }
+        }
+      }
+    }
+    _lastTranslationConnectError = lastErr;
+    return null;
+  }
 
   // Playback: flutter_pcm_sound feeds from a callback. We queue PCM frames (no WAV headers).
   final Queue<Uint8List> _pcmQueue = Queue<Uint8List>();
@@ -92,26 +125,22 @@ class AITranslationService extends ChangeNotifier {
     // Setup playback (PCM). Actual sample rate is taken from decoded WAV per chunk.
     await _setupPcmPlayer(sampleRate: _playbackSampleRate);
 
-    // Try multiple backend URLs in order (LAN/VPN differences).
-    Object? lastErr;
-    for (final url in AppConfig.translationStreamUrls) {
-      try {
-        debugPrint('AITranslationService: connecting to $url');
-        _webSocket = await WebSocket.connect(url)
-            .timeout(const Duration(seconds: 6));
-        _wsSubscription = null;
-        lastErr = null;
-        break;
-      } catch (e) {
-        lastErr = e;
-        debugPrint('AITranslationService: connect failed for $url: $e');
-      }
-    }
-    if (_webSocket == null) {
-      _lastError = 'Failed to connect to translation backend: $lastErr';
+    // Try multiple backend URLs; retry each (Render cold start / flaky mobile data).
+    final ws = await _openTranslationWebSocket();
+    if (ws == null) {
+      final lastErr = _lastTranslationConnectError;
+      const prodHint =
+          ' Check mobile data/Wi‑Fi; first request to Render can take 30–60s after sleep.';
+      const localHint = ' Run FastAPI locally or set LINGUA_TRANSLATE_WS.';
+      const hint = AppConfig.profile == 'prod' ? prodHint : localHint;
+      _lastError =
+          'Failed to connect to translation backend after ${AppConfig.translationWsRetries} tries '
+          '(${AppConfig.translationWsTimeoutSec}s each): $lastErr.$hint';
       notifyListeners();
       throw StateError(_lastError!);
     }
+    _webSocket = ws;
+    _wsSubscription = null;
 
     _wsSubscription = _webSocket!.listen(
       (data) async {
@@ -175,10 +204,12 @@ class AITranslationService extends ChangeNotifier {
           'closeCode=$code closeReason=$reason',
         );
         if (_isStreaming) {
-          _lastError =
-              'Translation disconnected (ws close $code). '
-              'Run uvicorn on the PC, then: adb reverse tcp:8000 tcp:8000 '
-              '(or use your PC LAN IP in ai_translation_service.dart).';
+          _lastError = AppConfig.profile == 'prod'
+              ? 'Translation disconnected (ws close $code). '
+                  'Check ${AppConfig.translationStreamUrls.first} and your network.'
+              : 'Translation disconnected (ws close $code). '
+                  'Run uvicorn on the PC, then: adb reverse tcp:8000 tcp:8000 '
+                  '(or set LINGUA_TRANSLATE_WS).';
           notifyListeners();
         }
         await stopTranslationStream();

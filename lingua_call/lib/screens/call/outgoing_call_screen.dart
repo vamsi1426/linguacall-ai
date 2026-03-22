@@ -48,7 +48,11 @@ class _OutgoingCallScreenState extends State<OutgoingCallScreen> {
       final signalingOk = await _signaling.waitForConnection();
       if (!mounted) return;
 
-      final peerUid = await findUidByPhone(widget.targetPhone);
+      var peerUid = await findUidByPhone(widget.targetPhone);
+      if (peerUid == null) {
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+        peerUid = await findUidByPhone(widget.targetPhone);
+      }
       final realtime = AppConfig.realtimeCallingEnabled &&
           widget.callType == CallType.voice &&
           peerUid != null &&

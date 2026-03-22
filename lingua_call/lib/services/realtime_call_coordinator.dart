@@ -156,20 +156,30 @@ class RealtimeCallCoordinator extends ChangeNotifier {
     if (_translationRunning) return;
     _translationRunning = true;
 
-    try {
-      await translation.prepareRemotePlaybackPipeline();
-      await translation.startTranslationStream(
-        sourceLang: _sourceLang,
-        targetLang: _targetLang,
-        playLocally: false,
-        onTranslatedPcm: (pcm, sampleRate) {
-          _webrtc?.sendPcmBytes(pcm);
-        },
-      );
-    } catch (e, st) {
-      debugPrint('RealtimeCallCoordinator: translation start failed: $e\n$st');
-      translation.notifyListeners();
+    const retryDelay = Duration(seconds: 3);
+    for (var attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await translation.prepareRemotePlaybackPipeline();
+        await translation.startTranslationStream(
+          sourceLang: _sourceLang,
+          targetLang: _targetLang,
+          playLocally: false,
+          onTranslatedPcm: (pcm, sampleRate) {
+            _webrtc?.sendPcmBytes(pcm);
+          },
+        );
+        return;
+      } catch (e, st) {
+        debugPrint(
+          'RealtimeCallCoordinator: translation start failed (attempt $attempt/2): $e\n$st',
+        );
+        translation.notifyListeners();
+        if (attempt < 2) {
+          await Future<void>.delayed(retryDelay);
+        }
+      }
     }
+    _translationRunning = false;
   }
 
   /// Updates STT/TTS direction for this device (Telugu→English vs English→Telugu).

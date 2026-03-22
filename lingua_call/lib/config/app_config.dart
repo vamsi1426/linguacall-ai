@@ -29,6 +29,22 @@ class AppConfig {
     defaultValue: true,
   );
 
+  /// Per-attempt timeout for `WebSocket.connect` to `/ws/translate-stream`.
+  /// Render (and similar hosts) often need 30–60s on cold start; 6s caused frequent timeouts.
+  static const int translationWsTimeoutSec = int.fromEnvironment(
+    'LINGUA_TRANSLATE_WS_TIMEOUT_SEC',
+    defaultValue: 45,
+  );
+
+  /// Retries per URL if connect fails (transient network / cold start).
+  static const int translationWsRetries = int.fromEnvironment(
+    'LINGUA_TRANSLATE_WS_RETRIES',
+    defaultValue: 3,
+  );
+
+  static Duration get translationWsConnectTimeout =>
+      const Duration(seconds: translationWsTimeoutSec);
+
   static const String _defaultSignalingLocal = 'http://127.0.0.1:3000';
   static const String _defaultTranslateWsLocal = 'ws://127.0.0.1:8000/ws/translate-stream';
 
@@ -64,7 +80,8 @@ class AppConfig {
   static void debugLogEndpoints() {
     debugPrint(
       'AppConfig: profile=$profile signaling=$signalingHttpUrl '
-      'translate=${translationStreamUrls.join(", ")}',
+      'translate=${translationStreamUrls.join(", ")} '
+      'wsTimeout=${translationWsTimeoutSec}s wsRetries=$translationWsRetries',
     );
   }
 }
