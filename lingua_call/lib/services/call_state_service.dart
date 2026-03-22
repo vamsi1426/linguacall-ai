@@ -28,8 +28,9 @@ class CallStateService extends ChangeNotifier {
   bool _webrtcMediaReady = false;
   bool get webrtcMediaReady => _webrtcMediaReady;
 
-  Timer? _connectTimer;
   Timer? _endTimer;
+  /// Ends outgoing call if still [CallPhase.calling] (no peer accept / no WebRTC).
+  Timer? _outgoingRingTimer;
 
   CallPhase get phase => _phase;
   CallType get callType => _callType;
@@ -37,17 +38,27 @@ class CallStateService extends ChangeNotifier {
   String? get targetPhone => _targetPhone;
   bool get isOutgoing => _isOutgoing;
 
+  static const Duration _outgoingRingTimeout = Duration(seconds: 60);
+
   void _cancelTimers() {
-    _connectTimer?.cancel();
     _endTimer?.cancel();
-    _connectTimer = null;
+    _outgoingRingTimer?.cancel();
     _endTimer = null;
+    _outgoingRingTimer = null;
+  }
+
+  void _scheduleOutgoingRingTimeout() {
+    _outgoingRingTimer?.cancel();
+    _outgoingRingTimer = Timer(_outgoingRingTimeout, () {
+      if (_phase == CallPhase.calling) {
+        endCall(reason: 'no_answer');
+      }
+    });
   }
 
   Future<void> startOutgoingCall({
     required String targetPhone,
     required CallType callType,
-    bool simulateConnection = true,
     String? peerUid,
   }) async {
     final currentUser = _auth.currentUser;
@@ -84,19 +95,9 @@ class CallStateService extends ChangeNotifier {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      if (simulateConnection) {
-        // Demo: calling -> connected (unchanged legacy behavior).
-        _connectTimer = Timer(const Duration(seconds: 4), () async {
-          _phase = CallPhase.connected;
-          notifyListeners();
-          if (_callId == null) return;
-          await _firestore.collection('calls').doc(_callId).update({
-            'status': _phase.name,
-            'connectedAt': FieldValue.serverTimestamp(),
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-        });
-      }
+      // Never fake "connected" without the callee accepting. If nobody picks up,
+      // [_outgoingRingTimer] ends the call with reason no_answer.
+      _scheduleOutgoingRingTimeout();
     } catch (e) {
       debugPrint('startOutgoingCall failed: $e');
       await endCall(reason: 'error');
@@ -167,6 +168,8 @@ class CallStateService extends ChangeNotifier {
   /// WebRTC negotiation in progress (signaling accepted, waiting for media path).
   void markConnecting() {
     if (_phase == CallPhase.calling || _phase == CallPhase.ringing) {
+      _outgoingRingTimer?.cancel();
+      _outgoingRingTimer = null;
       _phase = CallPhase.connecting;
       notifyListeners();
     }

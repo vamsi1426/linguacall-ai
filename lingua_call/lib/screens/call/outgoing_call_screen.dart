@@ -118,7 +118,6 @@ class _OutgoingCallScreenState extends State<OutgoingCallScreen> {
         await callState.startOutgoingCall(
           targetPhone: widget.targetPhone,
           callType: widget.callType,
-          simulateConnection: false,
           peerUid: peerUid,
         );
         _coordinator.armOutgoingSession(peerUid);
@@ -127,7 +126,6 @@ class _OutgoingCallScreenState extends State<OutgoingCallScreen> {
         await callState.startOutgoingCall(
           targetPhone: widget.targetPhone,
           callType: widget.callType,
-          simulateConnection: true,
         );
       }
     });
