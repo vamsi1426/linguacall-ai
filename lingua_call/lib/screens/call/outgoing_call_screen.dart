@@ -45,11 +45,28 @@ class _OutgoingCallScreenState extends State<OutgoingCallScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
 
+      final signalingOk = await _signaling.waitForConnection();
+      if (!mounted) return;
+
       final peerUid = await findUidByPhone(widget.targetPhone);
       final realtime = AppConfig.realtimeCallingEnabled &&
           widget.callType == CallType.voice &&
           peerUid != null &&
+          signalingOk &&
           _signaling.isConnected;
+
+      if (!signalingOk && peerUid != null && AppConfig.realtimeCallingEnabled) {
+        debugPrint(
+          'OutgoingCall: signaling not connected in time; using simulated call. '
+          'Check network and ${AppConfig.signalingHttpUrl}',
+        );
+      }
+      if (peerUid == null && AppConfig.realtimeCallingEnabled) {
+        debugPrint(
+          'OutgoingCall: no Firestore user for phone "${widget.targetPhone}" '
+          '(try full E.164 as stored in users.phone). Using simulated call.',
+        );
+      }
 
       if (realtime) {
         _signaling.onCallFailed = (Map<String, dynamic> data) {

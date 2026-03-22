@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:linguacall/config/app_config.dart';
@@ -21,6 +23,33 @@ class SignalingService extends ChangeNotifier {
 
   bool _isConnected = false;
   bool get isConnected => _isConnected;
+
+  /// Waits until Socket.io is connected and `register-user` can run, or [timeout] elapses.
+  /// Avoids the outgoing-call race where the first frame runs before [onConnect].
+  Future<bool> waitForConnection({
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    if (_isConnected) return true;
+
+    final completer = Completer<bool>();
+    Timer? timer;
+
+    void listener() {
+      if (_isConnected && !completer.isCompleted) {
+        timer?.cancel();
+        removeListener(listener);
+        completer.complete(true);
+      }
+    }
+
+    addListener(listener);
+    timer = Timer(timeout, () {
+      removeListener(listener);
+      if (!completer.isCompleted) completer.complete(false);
+    });
+
+    return completer.future;
+  }
 
   void connectAndRegister(String uid) {
     currentUid = uid;
