@@ -43,6 +43,10 @@ Future<String?> findUidByPhone(String phone) async {
   final digits = digitsOnly(raw);
   final candidates = <String>{raw, digits, '+$digits'};
   _addInferredE164Candidates(candidates, digits);
+  // India mobile: national 10 digits, common when inference from self-number fails (mixed test +1 / prod +91).
+  if (digits.length == 10) {
+    candidates.add('+91$digits');
+  }
   candidates.removeWhere((e) => e.isEmpty);
 
   final fs = FirebaseFirestore.instance;

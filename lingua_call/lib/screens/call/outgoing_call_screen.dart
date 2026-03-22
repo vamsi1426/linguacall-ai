@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:linguacall/config/app_config.dart';
 import 'package:linguacall/services/call_state_service.dart';
@@ -29,6 +30,8 @@ class OutgoingCallScreen extends StatefulWidget {
 
 class _OutgoingCallScreenState extends State<OutgoingCallScreen> {
   bool _didNavigateToConnectedScreen = false;
+  /// Shown when this is a demo/simulated call — explains why B did not ring.
+  String? _simulatedBecause;
   late final VoidCallback _listener;
   late final CallStateService _callState;
   late final SignalingService _signaling;
@@ -45,7 +48,16 @@ class _OutgoingCallScreenState extends State<OutgoingCallScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
 
-      final signalingOk = await _signaling.waitForConnection();
+      var signalingOk = await _signaling.waitForConnection();
+      if (!signalingOk) {
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid != null) {
+          _signaling.connectAndRegister(uid);
+          signalingOk = await _signaling.waitForConnection(
+            timeout: const Duration(seconds: 20),
+          );
+        }
+      }
       if (!mounted) return;
 
       var peerUid = await findUidByPhone(widget.targetPhone);
@@ -59,16 +71,35 @@ class _OutgoingCallScreenState extends State<OutgoingCallScreen> {
           signalingOk &&
           _signaling.isConnected;
 
-      if (!signalingOk && peerUid != null && AppConfig.realtimeCallingEnabled) {
-        debugPrint(
-          'OutgoingCall: signaling not connected in time; using simulated call. '
-          'Check network and ${AppConfig.signalingHttpUrl}',
-        );
+      String? simReason;
+      if (!realtime) {
+        if (!AppConfig.realtimeCallingEnabled) {
+          simReason = 'Realtime calling is disabled in this build.';
+        } else if (widget.callType != CallType.voice) {
+          simReason = 'Realtime calls are voice-only in this app.';
+        } else if (peerUid == null) {
+          simReason =
+              'No user found for this number in Firestore. The other phone must log in once '
+              'so their number is saved under users.phone (try full +country code, e.g. +919704268363).';
+        } else if (!signalingOk || !_signaling.isConnected) {
+          simReason =
+              'Cannot reach the signaling server (${AppConfig.signalingHttpUrl}). '
+              'Check internet; open the app on Home for a few seconds, then try again.';
+        }
+        if (simReason != null) {
+          debugPrint('OutgoingCall simulated: $simReason');
+        }
       }
-      if (peerUid == null && AppConfig.realtimeCallingEnabled) {
-        debugPrint(
-          'OutgoingCall: no Firestore user for phone "${widget.targetPhone}" '
-          '(try full E.164 as stored in users.phone). Using simulated call.',
+
+      if (!mounted) return;
+      if (simReason != null) {
+        setState(() => _simulatedBecause = simReason);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(simReason, style: const TextStyle(fontSize: 13)),
+            backgroundColor: Colors.deepOrange.shade900,
+            duration: const Duration(seconds: 8),
+          ),
         );
       }
 
@@ -231,8 +262,15 @@ class _OutgoingCallScreenState extends State<OutgoingCallScreen> {
                     Text(
                       callState.peerUid != null
                           ? 'Realtime call: signaling + WebRTC + translated audio'
-                          : 'Simulated call lifecycle: calling → connected → ended',
-                      style: const TextStyle(color: AppTheme.textMuted),
+                          : (_simulatedBecause ??
+                              'Demo mode: the other phone will not ring. '
+                              'See the orange message above or open the app on phone B first.'),
+                      style: TextStyle(
+                        color: callState.peerUid != null
+                            ? AppTheme.textMuted
+                            : Colors.orangeAccent.shade100,
+                        fontSize: 12,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                   ],
