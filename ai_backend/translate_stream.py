@@ -287,6 +287,8 @@ async def translate_stream_websocket(websocket: WebSocket) -> None:
       3) Send ONLY binary WAV bytes back after each STT->Translate->TTS pipeline step.
     """
     await websocket.accept()
+    # Always visible on hosts that don't propagate app loggers to stdout.
+    print("linguacall: translate-stream WebSocket accepted", flush=True)
     logger.info("WebSocket accepted: /ws/translate-stream")
 
     stop_event = threading.Event()

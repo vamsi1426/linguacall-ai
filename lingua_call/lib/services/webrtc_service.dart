@@ -11,8 +11,8 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 /// We **do not** call [getUserMedia] for the microphone here: live speech is
 /// captured by `MicStream` in the translation service and sent to the backend.
 /// Opening a second mic via WebRTC caused Android conflicts (no PCM).
-/// Instead we add a **recv-only** audio transceiver so SDP has an audio m-line
-/// without capturing the device mic.
+/// Signaling uses SCTP + data channel only (no recv-only audio transceiver) so
+/// we don’t add extra m-lines that can break some Android stacks.
 class WebRtcService {
   RTCPeerConnection? _pc;
   RTCDataChannel? _dataChannel;
@@ -28,11 +28,24 @@ class WebRtcService {
 
   static const String dataChannelLabel = 'translate-audio';
 
+  /// SCTP often caps a single binary message (~64KB). Split larger PCM.
+  static const int _maxDcBinaryBytes = 16384;
+
   Future<RTCPeerConnection> initPeerConnection() async {
     final configuration = <String, dynamic>{
       'sdpSemantics': 'unified-plan',
       'iceServers': <Map<String, dynamic>>[
         {'urls': 'stun:stun.l.google.com:19302'},
+        // Public TURN — mobile ↔ mobile often needs relay when STUN-only P2P fails.
+        {
+          'urls': <String>[
+            'turn:openrelay.metered.ca:80',
+            'turn:openrelay.metered.ca:443',
+            'turn:openrelay.metered.ca:443?transport=tcp',
+          ],
+          'username': 'openrelayproject',
+          'credential': 'openrelayproject',
+        },
       ],
     };
     _pc = await createPeerConnection(configuration, {
@@ -47,6 +60,7 @@ class WebRtcService {
     };
 
     _pc!.onConnectionState = (RTCPeerConnectionState state) {
+      debugPrint('WebRtcService: peerConnectionState=$state');
       onConnectionState?.call(state);
     };
 
@@ -92,9 +106,10 @@ class WebRtcService {
   Future<void> createDataChannelAsCaller() async {
     if (_pc == null) throw StateError('Peer connection not created');
 
+    // Reliable, ordered delivery for translated PCM (unordered + lossy was dropping audio).
     final init = RTCDataChannelInit()
-      ..ordered = false
-      ..maxRetransmits = 0;
+      ..ordered = true
+      ..maxRetransmits = -1;
 
     final dc = await _pc!.createDataChannel(dataChannelLabel, init);
     _wireDataChannel(dc);
@@ -131,7 +146,15 @@ class WebRtcService {
       return;
     }
     try {
-      await dc.send(RTCDataChannelMessage.fromBinary(pcm));
+      var offset = 0;
+      while (offset < pcm.length) {
+        final end = offset + _maxDcBinaryBytes < pcm.length
+            ? offset + _maxDcBinaryBytes
+            : pcm.length;
+        final slice = Uint8List.sublistView(pcm, offset, end);
+        await dc.send(RTCDataChannelMessage.fromBinary(slice));
+        offset = end;
+      }
     } catch (e, st) {
       debugPrint('WebRtcService: send pcm failed: $e\n$st');
     }
@@ -141,6 +164,7 @@ class WebRtcService {
     _dataChannel = channel;
 
     channel.onDataChannelState = (RTCDataChannelState state) {
+      debugPrint('WebRtcService: dataChannel state=$state label=${channel.label}');
       onDataChannelState?.call(state);
     };
 

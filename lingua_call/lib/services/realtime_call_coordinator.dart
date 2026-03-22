@@ -85,7 +85,6 @@ class RealtimeCallCoordinator extends ChangeNotifier {
 
     await _webrtc!.initPeerConnection();
     await _webrtc!.createDataChannelAsCaller();
-    await _webrtc!.addRecvOnlyAudioForSignalingCompatibility();
 
     final offer = await _webrtc!.createOfferAndSetLocal();
     final peer = _remoteUid;

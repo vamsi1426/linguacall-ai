@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from translate_stream import translate_stream_websocket
 
 # Load .env from ai_backend/ when present (local dev)
 load_dotenv(Path(__file__).resolve().parent / ".env")
+
+logging.basicConfig(level=logging.INFO, force=True)
 
 configure_google_application_credentials()
 
