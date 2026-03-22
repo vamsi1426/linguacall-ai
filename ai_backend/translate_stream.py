@@ -21,6 +21,15 @@ from google_env import configure_google_application_credentials
 logger = logging.getLogger("linguacall.translate_stream")
 
 
+def _is_stt_max_stream_duration_error(exc: BaseException) -> bool:
+    """Google STT ends each streaming RPC after ~305s; we must open a new session."""
+    msg = str(exc).lower()
+    return (
+        "exceeded maximum allowed stream duration" in msg
+        or "maximum allowed stream duration" in msg
+    )
+
+
 def _normalize_lang_code(code: Optional[str]) -> str:
     """
     Map short and full client language codes.
@@ -125,21 +134,6 @@ def _run_translation_worker(
         _sr_hz * _bytes_per_sample * _silence_ms // 1000
     )
 
-    # First StreamingRecognizeRequest MUST carry streaming_config only; following messages
-    # carry audio_content only (google.cloud.speech SpeechHelpers used to wrap this with a
-    # dict — that can break proto serialization). Call the gapic client with a proper iterator.
-    def streaming_requests():
-        yield speech.StreamingRecognizeRequest(streaming_config=streaming_config)
-        while not stop_event.is_set():
-            try:
-                chunk = pcm_queue.get(timeout=0.2)
-            except queue.Empty:
-                yield speech.StreamingRecognizeRequest(audio_content=_silence_chunk)
-                continue
-            if chunk is None:
-                return
-            yield speech.StreamingRecognizeRequest(audio_content=chunk)
-
     def safe_send(wav_bytes: bytes) -> None:
         fut = asyncio.run_coroutine_threadsafe(websocket.send_bytes(wav_bytes), loop)
 
@@ -151,86 +145,114 @@ def _run_translation_worker(
 
         fut.add_done_callback(_log_done)
 
+    def process_response(response: speech.StreamingRecognizeResponse) -> None:
+        nonlocal last_sent_at, last_sent_text
+
+        if not response.results:
+            return
+
+        result = response.results[0]
+        if not result.alternatives:
+            return
+
+        transcript = result.alternatives[0].transcript.strip()
+        if not transcript:
+            return
+
+        now = time.time()
+        is_final = bool(result.is_final)
+
+        # Throttle interim results to ~750ms to keep playback near real-time.
+        if not is_final:
+            if (now - last_sent_at) < config.interim_throttle_seconds:
+                return
+            # Avoid re-sending identical partial text.
+            if last_sent_text is not None and transcript == last_sent_text:
+                return
+
+        if not config.enabled:
+            return
+
+        last_sent_at = now
+        last_sent_text = transcript
+
+        try:
+            src_tr = _short_lang_for_translate(config.source_lang)
+            tgt_tr = _short_lang_for_translate(config.target_lang)
+            translation = translate_client.translate(
+                transcript,
+                target_language=tgt_tr,
+                source_language=src_tr,
+            )
+            translated_text = translation.get("translatedText", "").strip()
+            if not translated_text:
+                return
+
+            synthesis_input = texttospeech.SynthesisInput(text=translated_text)
+            voice = texttospeech.VoiceSelectionParams(
+                language_code=_tts_voice_language_code(config.target_lang),
+                ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
+            )
+            audio_config = texttospeech.AudioConfig(
+                audio_encoding=texttospeech.AudioEncoding.LINEAR16,
+                sample_rate_hertz=16000,
+                speaking_rate=1.0,
+            )
+
+            tts_response = tts_client.synthesize_speech(
+                input=synthesis_input,
+                voice=voice,
+                audio_config=audio_config,
+            )
+
+            pcm16 = tts_response.audio_content  # raw PCM16 bytes (little-endian)
+            wav_bytes = pcm16le_to_wav_bytes(pcm16, sample_rate_hz=16000, channels=1)
+
+            safe_send(wav_bytes)
+        except Exception as e:
+            logger.exception("Pipeline error (translate+tts): %s", e)
+
     try:
-        responses = GapicSpeechClient.streaming_recognize(
-            speech_client,
-            requests=streaming_requests(),
-        )
-        for response in responses:
-            if stop_event.is_set():
-                break
+        # Google limits each StreamingRecognize RPC to ~305s; open a new session when needed.
+        session_index = 0
+        while not stop_event.is_set():
+            session_index += 1
 
-            if not response.results:
-                continue
-
-            result = response.results[0]
-            if not result.alternatives:
-                continue
-
-            transcript = result.alternatives[0].transcript.strip()
-            if not transcript:
-                continue
-
-            now = time.time()
-            is_final = bool(result.is_final)
-
-            # Throttle interim results to ~750ms to keep playback near real-time.
-            if not is_final:
-                if (now - last_sent_at) < config.interim_throttle_seconds:
-                    continue
-                # Avoid re-sending identical partial text.
-                if last_sent_text is not None and transcript == last_sent_text:
-                    continue
-
-            if not config.enabled:
-                # Drain only (STT still runs to maintain pipeline, but no translate/TTS).
-                continue
-
-            # Strict pipeline order:
-            # STT transcript -> Translate -> TTS -> WAV -> send
-            last_sent_at = now
-            last_sent_text = transcript
+            def streaming_requests():
+                yield speech.StreamingRecognizeRequest(streaming_config=streaming_config)
+                while not stop_event.is_set():
+                    try:
+                        chunk = pcm_queue.get(timeout=0.2)
+                    except queue.Empty:
+                        yield speech.StreamingRecognizeRequest(audio_content=_silence_chunk)
+                        continue
+                    if chunk is None:
+                        return
+                    yield speech.StreamingRecognizeRequest(audio_content=chunk)
 
             try:
-                src_tr = _short_lang_for_translate(config.source_lang)
-                tgt_tr = _short_lang_for_translate(config.target_lang)
-                translation = translate_client.translate(
-                    transcript,
-                    target_language=tgt_tr,
-                    source_language=src_tr,
+                logger.debug("Starting STT streaming session #%s", session_index)
+                responses = GapicSpeechClient.streaming_recognize(
+                    speech_client,
+                    requests=streaming_requests(),
                 )
-                translated_text = translation.get("translatedText", "").strip()
-                if not translated_text:
+                for response in responses:
+                    if stop_event.is_set():
+                        break
+                    process_response(response)
+            except OutOfRange as e:
+                if _is_stt_max_stream_duration_error(e):
+                    logger.info(
+                        "STT session #%s hit max duration; starting new stream: %s",
+                        session_index,
+                        e,
+                    )
                     continue
-
-                synthesis_input = texttospeech.SynthesisInput(text=translated_text)
-                voice = texttospeech.VoiceSelectionParams(
-                    language_code=_tts_voice_language_code(config.target_lang),
-                    ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
-                )
-                audio_config = texttospeech.AudioConfig(
-                    audio_encoding=texttospeech.AudioEncoding.LINEAR16,
-                    sample_rate_hertz=16000,
-                    speaking_rate=1.0,
-                )
-
-                tts_response = tts_client.synthesize_speech(
-                    input=synthesis_input,
-                    voice=voice,
-                    audio_config=audio_config,
-                )
-
-                pcm16 = tts_response.audio_content  # raw PCM16 bytes (little-endian)
-                wav_bytes = pcm16le_to_wav_bytes(pcm16, sample_rate_hz=16000, channels=1)
-
-                safe_send(wav_bytes)
+                logger.warning("Streaming STT stopped (OutOfRange): %s", e)
+                break
             except Exception as e:
-                logger.exception("Pipeline error (translate+tts): %s", e)
-                # Continue streaming without crashing the websocket session.
-                continue
-    except OutOfRange as e:
-        # Can still occur on very long stalls; log without traceback noise.
-        logger.warning("Streaming STT stopped (OutOfRange): %s", e)
+                logger.exception("STT streaming session #%s error: %s", session_index, e)
+                break
     except Exception as e:
         logger.exception("Worker crashed: %s", e)
     finally:
