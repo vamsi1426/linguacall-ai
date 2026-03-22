@@ -5,6 +5,17 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:linguacall/config/app_config.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
+/// Socket.io may deliver an event payload as a [Map] or as a single-element [List] (server/version dependent).
+Map<String, dynamic>? _socketPayloadAsMap(dynamic data) {
+  if (data is Map) {
+    return Map<String, dynamic>.from(data);
+  }
+  if (data is List && data.isNotEmpty && data.first is Map) {
+    return Map<String, dynamic>.from(data.first as Map);
+  }
+  return null;
+}
+
 class SignalingService extends ChangeNotifier {
   IO.Socket? socket;
 
@@ -56,7 +67,8 @@ class SignalingService extends ChangeNotifier {
 
     socket?.dispose();
     socket = IO.io(signalingUrl, <String, dynamic>{
-      'transports': <String>['websocket'],
+      // Polling fallback helps some mobile carriers / proxies where websocket-only fails.
+      'transports': <String>['websocket', 'polling'],
       'reconnection': true,
       'reconnectionAttempts': 20,
       'reconnectionDelay': 1000,
@@ -73,45 +85,43 @@ class SignalingService extends ChangeNotifier {
     });
 
     socket!.on('incoming-call', (dynamic data) {
-      if (data is Map && onIncomingCall != null) {
-        onIncomingCall!(Map<String, dynamic>.from(data));
+      final map = _socketPayloadAsMap(data);
+      if (map == null) {
+        debugPrint('Signaling: incoming-call ignored (bad payload type: ${data.runtimeType})');
+        return;
       }
+      debugPrint('Signaling: incoming-call from=${map['callerUid']} type=${map['type']}');
+      onIncomingCall?.call(map);
     });
 
     socket!.on('call-accepted', (dynamic data) {
-      if (data is Map && onCallAccepted != null) {
-        onCallAccepted!(Map<String, dynamic>.from(data));
-      }
+      final map = _socketPayloadAsMap(data);
+      if (map != null) onCallAccepted?.call(map);
     });
 
     socket!.on('call-rejected', (dynamic data) {
-      if (data is Map && onCallRejected != null) {
-        onCallRejected!(Map<String, dynamic>.from(data));
-      }
+      final map = _socketPayloadAsMap(data);
+      if (map != null) onCallRejected?.call(map);
     });
 
     socket!.on('call-failed', (dynamic data) {
-      if (data is Map && onCallFailed != null) {
-        onCallFailed!(Map<String, dynamic>.from(data));
-      }
+      final map = _socketPayloadAsMap(data);
+      if (map != null) onCallFailed?.call(map);
     });
 
     socket!.on('offer', (dynamic data) {
-      if (data is Map && onOffer != null) {
-        onOffer!(Map<String, dynamic>.from(data));
-      }
+      final map = _socketPayloadAsMap(data);
+      if (map != null) onOffer?.call(map);
     });
 
     socket!.on('answer', (dynamic data) {
-      if (data is Map && onAnswer != null) {
-        onAnswer!(Map<String, dynamic>.from(data));
-      }
+      final map = _socketPayloadAsMap(data);
+      if (map != null) onAnswer?.call(map);
     });
 
     socket!.on('ice-candidate', (dynamic data) {
-      if (data is Map && onRemoteIceCandidate != null) {
-        onRemoteIceCandidate!(Map<String, dynamic>.from(data));
-      }
+      final map = _socketPayloadAsMap(data);
+      if (map != null) onRemoteIceCandidate?.call(map);
     });
 
     socket!.onDisconnect((_) {

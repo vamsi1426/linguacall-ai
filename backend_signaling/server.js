@@ -44,14 +44,14 @@ io.on('connection', (socket) => {
     const type = payload && payload.type != null ? String(payload.type) : 'voice';
     if (!callerUid || !targetUid) return;
 
-    const targetSocketId = uidToSocket.get(targetUid);
-    if (!targetSocketId) {
+    if (!uidToSocket.has(targetUid)) {
       socket.emit('call-failed', { reason: 'offline', targetUid });
       return;
     }
 
     const callId = `${callerUid}_${targetUid}_${Date.now()}`;
-    io.to(targetSocketId).emit('incoming-call', {
+    // Room `uid:<id>` is joined in register-user — more reliable than raw socket.id routing.
+    io.to(`uid:${targetUid}`).emit('incoming-call', {
       callerUid,
       targetUid,
       type,
@@ -82,10 +82,9 @@ io.on('connection', (socket) => {
       payload && payload.targetUid != null ? String(payload.targetUid) : '';
     if (!rejecterUid || !targetUid) return;
 
-    const callerSocketId = uidToSocket.get(targetUid);
-    if (!callerSocketId) return;
+    if (!uidToSocket.has(targetUid)) return;
 
-    io.to(callerSocketId).emit('call-rejected', {
+    io.to(`uid:${targetUid}`).emit('call-rejected', {
       rejecterUid,
       callerUid: targetUid,
     });
@@ -98,10 +97,9 @@ io.on('connection', (socket) => {
     const sdp = payload && payload.sdp != null ? String(payload.sdp) : '';
     if (!from || !to || !sdp) return;
 
-    const targetSocketId = uidToSocket.get(to);
-    if (!targetSocketId) return;
+    if (!uidToSocket.has(to)) return;
 
-    io.to(targetSocketId).emit('offer', { from, sdp });
+    io.to(`uid:${to}`).emit('offer', { from, sdp });
   });
 
   socket.on('answer', (payload) => {
@@ -110,10 +108,9 @@ io.on('connection', (socket) => {
     const sdp = payload && payload.sdp != null ? String(payload.sdp) : '';
     if (!from || !to || !sdp) return;
 
-    const targetSocketId = uidToSocket.get(to);
-    if (!targetSocketId) return;
+    if (!uidToSocket.has(to)) return;
 
-    io.to(targetSocketId).emit('answer', { from, sdp });
+    io.to(`uid:${to}`).emit('answer', { from, sdp });
   });
 
   socket.on('ice-candidate', (payload) => {
@@ -121,10 +118,9 @@ io.on('connection', (socket) => {
     const to = payload && payload.to != null ? String(payload.to) : '';
     if (!from || !to) return;
 
-    const targetSocketId = uidToSocket.get(to);
-    if (!targetSocketId) return;
+    if (!uidToSocket.has(to)) return;
 
-    io.to(targetSocketId).emit('ice-candidate', {
+    io.to(`uid:${to}`).emit('ice-candidate', {
       from,
       candidate: payload.candidate,
       sdpMid: payload.sdpMid,

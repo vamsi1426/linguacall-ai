@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:linguacall/utils/theme.dart';
 import 'package:linguacall/screens/home_screen.dart';
@@ -25,7 +26,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   late final VoidCallback _authListener;
   late final AuthService _auth;
   late final SignalingService _signaling;
-  bool _didWireIncoming = false;
 
   final List<Widget> _screens = const [
     HomeScreen(),
@@ -44,8 +44,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _auth = context.read<AuthService>();
     _signaling = context.read<SignalingService>();
 
+    // Register before any socket connect so the first incoming-call is never dropped.
+    _signaling.onIncomingCall = _onIncomingCall;
+
     _authListener = () {
-      final uid = _auth.user?.uid;
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? _auth.user?.uid;
       if (uid == null || _didConnectSignaling) return;
       _didConnectSignaling = true;
       _signaling.connectAndRegister(uid);
@@ -53,29 +56,25 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     _auth.addListener(_authListener);
 
-    // If user already exists, connect immediately.
+    // If user already exists, connect as soon as the first frame is built.
     WidgetsBinding.instance.addPostFrameCallback((_) => _authListener());
+  }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_didWireIncoming) return;
-      _didWireIncoming = true;
-      _signaling.onIncomingCall = (Map<String, dynamic> data) {
-        if (!mounted) return;
-        final callerUid = data['callerUid'] as String?;
-        final type = (data['type'] as String?) ?? 'voice';
-        final callType = type == 'video' ? CallType.video : CallType.voice;
-        final label = callerUid ?? 'Unknown';
-        Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => IncomingCallScreen(
-              fromPhone: label,
-              callType: callType,
-              callerUid: callerUid,
-            ),
-          ),
-        );
-      };
-    });
+  void _onIncomingCall(Map<String, dynamic> data) {
+    if (!mounted) return;
+    final callerUid = data['callerUid'] as String?;
+    final type = (data['type'] as String?) ?? 'voice';
+    final callType = type == 'video' ? CallType.video : CallType.voice;
+    final label = callerUid ?? 'Unknown';
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => IncomingCallScreen(
+          fromPhone: label,
+          callType: callType,
+          callerUid: callerUid,
+        ),
+      ),
+    );
   }
 
   @override
