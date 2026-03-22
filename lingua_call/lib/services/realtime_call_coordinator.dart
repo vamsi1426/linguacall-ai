@@ -133,7 +133,15 @@ class RealtimeCallCoordinator extends ChangeNotifier {
   }
 
   void _onPcState(RTCPeerConnectionState state) {
+    debugPrint(
+      'RealtimeCallCoordinator: peerConnectionState=$state '
+      'isCaller=$_isCaller remoteUid=$_remoteUid phase=${callState.phase}',
+    );
     if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+      debugPrint(
+        'RealtimeCallCoordinator: ending call — WebRTC Failed '
+        '(check ICE/TURN; see WebRtcService iceConnectionState logs above)',
+      );
       unawaited(callState.endCall(reason: 'webrtc_failed'));
       endRealtimeSession();
     }

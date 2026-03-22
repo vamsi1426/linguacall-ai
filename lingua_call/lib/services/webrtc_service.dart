@@ -71,6 +71,14 @@ class WebRtcService {
       onIceCandidate?.call(candidate);
     };
 
+    _pc!.onIceConnectionState = (RTCIceConnectionState state) {
+      debugPrint('WebRtcService: iceConnectionState=$state');
+    };
+
+    _pc!.onSignalingState = (RTCSignalingState state) {
+      debugPrint('WebRtcService: signalingState=$state');
+    };
+
     _pc!.onConnectionState = (RTCPeerConnectionState state) {
       debugPrint('WebRtcService: peerConnectionState=$state');
       onConnectionState?.call(state);
