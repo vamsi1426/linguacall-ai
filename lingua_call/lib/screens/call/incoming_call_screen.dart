@@ -32,6 +32,8 @@ class IncomingCallScreen extends StatefulWidget {
 
 class _IncomingCallScreenState extends State<IncomingCallScreen> {
   bool _didNavigateToConnectedScreen = false;
+  /// Prevents duplicate `accept-call` emits (seen as many lines in Render logs).
+  bool _acceptDispatched = false;
   late final VoidCallback _listener;
   late final CallStateService _callState;
   late final SignalingService _signaling;
@@ -104,10 +106,15 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   }
 
   Future<void> _accept() async {
+    if (_acceptDispatched) return;
     final callState = _callState;
+    if (callState.phase != CallPhase.ringing) return;
+
     final realtime = widget.callerUid != null &&
         AppConfig.realtimeCallingEnabled &&
         widget.callType == CallType.voice;
+
+    _acceptDispatched = true;
 
     if (realtime) {
       try {
@@ -117,6 +124,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
         signaling.acceptCall(widget.callerUid!);
         await callState.acceptIncomingCall(realtime: true);
       } catch (e) {
+        _acceptDispatched = false;
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

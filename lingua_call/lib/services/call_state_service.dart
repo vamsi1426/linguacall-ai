@@ -65,7 +65,9 @@ class CallStateService extends ChangeNotifier {
 
     try {
       final fromPhone = currentUser.phoneNumber ?? '';
-      final participantsUids = <String>[currentUser.uid];
+      final participantsUids = peerUid != null
+          ? <String>[currentUser.uid, peerUid]
+          : <String>[currentUser.uid];
 
       final callRef = _firestore.collection('calls').doc();
       _callId = callRef.id;
@@ -120,7 +122,10 @@ class CallStateService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final participantsUids = <String>[currentUser.uid];
+      final participantsUids = peerUid != null
+          ? <String>[currentUser.uid, peerUid]
+          : <String>[currentUser.uid];
+
       final callRef = _firestore.collection('calls').doc();
       _callId = callRef.id;
 

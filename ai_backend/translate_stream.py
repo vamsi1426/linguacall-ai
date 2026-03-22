@@ -12,6 +12,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from google.cloud import speech
 from google.cloud import translate_v2 as translate
 from google.cloud import texttospeech
+from google.api_core.exceptions import OutOfRange
 from google.cloud.speech_v1.services.speech.client import SpeechClient as GapicSpeechClient
 
 from audio_utils import pcm16le_to_wav_bytes
@@ -114,6 +115,16 @@ def _run_translation_worker(
     last_sent_at = 0.0
     last_sent_text = None  # type: Optional[str]
 
+    # Google streaming STT requires audio near real time; long idle gaps raise:
+    # OUT_OF_RANGE "Audio Timeout Error: Long duration elapsed without audio."
+    # When the client has not yet sent the next mic chunk, feed PCM16 silence.
+    _sr_hz = 16000
+    _bytes_per_sample = 2
+    _silence_ms = 100
+    _silence_chunk = b"\x00" * (
+        _sr_hz * _bytes_per_sample * _silence_ms // 1000
+    )
+
     # First StreamingRecognizeRequest MUST carry streaming_config only; following messages
     # carry audio_content only (google.cloud.speech SpeechHelpers used to wrap this with a
     # dict — that can break proto serialization). Call the gapic client with a proper iterator.
@@ -121,8 +132,9 @@ def _run_translation_worker(
         yield speech.StreamingRecognizeRequest(streaming_config=streaming_config)
         while not stop_event.is_set():
             try:
-                chunk = pcm_queue.get(timeout=0.25)
+                chunk = pcm_queue.get(timeout=0.2)
             except queue.Empty:
+                yield speech.StreamingRecognizeRequest(audio_content=_silence_chunk)
                 continue
             if chunk is None:
                 return
@@ -216,6 +228,9 @@ def _run_translation_worker(
                 logger.exception("Pipeline error (translate+tts): %s", e)
                 # Continue streaming without crashing the websocket session.
                 continue
+    except OutOfRange as e:
+        # Can still occur on very long stalls; log without traceback noise.
+        logger.warning("Streaming STT stopped (OutOfRange): %s", e)
     except Exception as e:
         logger.exception("Worker crashed: %s", e)
     finally:
