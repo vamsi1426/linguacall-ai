@@ -156,6 +156,7 @@ class RealtimeCallCoordinator extends ChangeNotifier {
     if (_translationRunning) return;
     _translationRunning = true;
 
+    debugPrint('Realtime: starting translation');
     const retryDelay = Duration(seconds: 3);
     for (var attempt = 1; attempt <= 2; attempt++) {
       try {
@@ -164,15 +165,15 @@ class RealtimeCallCoordinator extends ChangeNotifier {
           sourceLang: _sourceLang,
           targetLang: _targetLang,
           playLocally: false,
+          webRtcMicActive: true,
           onTranslatedPcm: (pcm, sampleRate) {
             _webrtc?.sendPcmBytes(pcm);
           },
         );
+        debugPrint('Realtime: translation started successfully');
         return;
       } catch (e, st) {
-        debugPrint(
-          'RealtimeCallCoordinator: translation start failed (attempt $attempt/2): $e\n$st',
-        );
+        debugPrint('Realtime: translation failed (attempt $attempt/2): $e\n$st');
         translation.notifyListeners();
         if (attempt < 2) {
           await Future<void>.delayed(retryDelay);
@@ -180,6 +181,12 @@ class RealtimeCallCoordinator extends ChangeNotifier {
       }
     }
     _translationRunning = false;
+    if (translation.lastError == null || translation.lastError!.isEmpty) {
+      translation.setDiagnosticError(
+        'Translation failed to start after retries. Check network and linguacall-api logs.',
+      );
+    }
+    debugPrint('Realtime: translation failed after retries');
   }
 
   /// Updates STT/TTS direction for this device (Telugu→English vs English→Telugu).
@@ -192,6 +199,7 @@ class RealtimeCallCoordinator extends ChangeNotifier {
         sourceLang: sourceLang,
         targetLang: targetLang,
         playLocally: false,
+        webRtcMicActive: true,
         onTranslatedPcm: (pcm, sampleRate) {
           _webrtc?.sendPcmBytes(pcm);
         },
@@ -209,16 +217,27 @@ class RealtimeCallCoordinator extends ChangeNotifier {
   Future<void> resumeTranslation(String sourceLang, String targetLang) async {
     _sourceLang = sourceLang;
     _targetLang = targetLang;
+    debugPrint('Realtime: starting translation (resume)');
     _translationRunning = true;
-    await translation.prepareRemotePlaybackPipeline();
-    await translation.startTranslationStream(
-      sourceLang: sourceLang,
-      targetLang: targetLang,
-      playLocally: false,
-      onTranslatedPcm: (pcm, sampleRate) {
-        _webrtc?.sendPcmBytes(pcm);
-      },
-    );
+    try {
+      await translation.prepareRemotePlaybackPipeline();
+      await translation.startTranslationStream(
+        sourceLang: sourceLang,
+        targetLang: targetLang,
+        playLocally: false,
+        webRtcMicActive: true,
+        onTranslatedPcm: (pcm, sampleRate) {
+          _webrtc?.sendPcmBytes(pcm);
+        },
+      );
+      debugPrint('Realtime: translation started successfully (resume)');
+    } catch (e, st) {
+      _translationRunning = false;
+      debugPrint('Realtime: translation failed (resume): $e\n$st');
+      if (translation.lastError == null || translation.lastError!.isEmpty) {
+        translation.setDiagnosticError('Translation failed to start: $e');
+      }
+    }
   }
 
   Future<void> endRealtimeSession() async {

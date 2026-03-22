@@ -276,19 +276,31 @@ class _VoiceCallScreenState extends State<VoiceCallScreen> {
                           Consumer<AITranslationService>(
                             builder: (context, translation, _) {
                               final err = translation.lastError;
-                              final line = err != null && err.isNotEmpty
-                                  ? (err.length > 120 ? '${err.substring(0, 117)}...' : err)
-                                  : realtime
-                                      ? (translation.isStreaming
-                                          ? 'Translating… (remote peer hears translated audio)'
-                                          : 'Idle')
-                                      : translation.isStreaming
-                                          ? 'Translating… (listen on this phone’s speaker)'
-                                          : 'Idle — enable translation & speak after backend connects';
+                              final hasErr = err != null && err.isNotEmpty;
+                              final errLine =
+                                  hasErr ? (err.length > 120 ? '${err.substring(0, 117)}...' : err) : null;
+
+                              String line;
+                              if (hasErr && errLine != null) {
+                                line = errLine;
+                              } else if (realtime) {
+                                if (!_translationEnabled) {
+                                  line = 'Translation OFF — turn the switch on to translate';
+                                } else if (translation.isStreaming) {
+                                  line = 'Translating… (remote peer hears translated audio)';
+                                } else {
+                                  line = 'Translation OFF or backend unreachable';
+                                }
+                              } else if (translation.isStreaming) {
+                                line = 'Translating… (listen on this phone’s speaker)';
+                              } else {
+                                line = 'Idle — enable translation & speak after backend connects';
+                              }
+
                               return Text(
                                 line,
                                 style: TextStyle(
-                                  color: err != null && err.isNotEmpty
+                                  color: hasErr
                                       ? Colors.orangeAccent
                                       : translation.isStreaming
                                           ? AppTheme.secondaryColor

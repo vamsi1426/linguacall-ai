@@ -106,6 +106,13 @@ def _run_translation_worker(
     translate_client = translate.Client()
     tts_client = texttospeech.TextToSpeechClient()
 
+    logger.info(
+        "Worker started: STT pipeline ready (source=%s target=%s enabled=%s)",
+        config.source_lang,
+        config.target_lang,
+        config.enabled,
+    )
+
     # Google Speech streaming config.
     recognition_config = speech.RecognitionConfig(
         encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
@@ -134,7 +141,17 @@ def _run_translation_worker(
         _sr_hz * _bytes_per_sample * _silence_ms // 1000
     )
 
+    wav_out_count = 0
+
     def safe_send(wav_bytes: bytes) -> None:
+        nonlocal wav_out_count
+        wav_out_count += 1
+        if wav_out_count <= 10 or wav_out_count % 25 == 0:
+            logger.info(
+                "Sending translated audio chunk #%s (%s bytes WAV)",
+                wav_out_count,
+                len(wav_bytes),
+            )
         fut = asyncio.run_coroutine_threadsafe(websocket.send_bytes(wav_bytes), loop)
 
         def _log_done(f: "asyncio.Future[object]") -> None:
@@ -270,17 +287,34 @@ async def translate_stream_websocket(websocket: WebSocket) -> None:
       3) Send ONLY binary WAV bytes back after each STT->Translate->TTS pipeline step.
     """
     await websocket.accept()
-    logger.info("WebSocket connected: /ws/translate-stream")
+    logger.info("WebSocket accepted: /ws/translate-stream")
 
     stop_event = threading.Event()
     pcm_queue: "queue.Queue[Optional[bytes]]" = queue.Queue(maxsize=100)
 
     worker_task = None
     loop = asyncio.get_running_loop()
+    no_pcm_warn_task: Optional[asyncio.Task] = None
 
     try:
-        start_text = await websocket.receive_text()
-        start = json.loads(start_text)
+        try:
+            start_text = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("No start JSON received within 5s after accept; closing")
+            await websocket.close(code=1008)
+            return
+
+        logger.info(
+            "Received start JSON: %s",
+            start_text[:800] + ("…" if len(start_text) > 800 else ""),
+        )
+
+        try:
+            start = json.loads(start_text)
+        except json.JSONDecodeError as e:
+            logger.warning("Invalid start JSON: %s", e)
+            await websocket.close(code=1003)
+            return
 
         if start.get("type") != "start":
             await websocket.close(code=1003)
@@ -313,11 +347,26 @@ async def translate_stream_websocket(websocket: WebSocket) -> None:
             )
         )
 
+        pcm_stats = {"received": 0}
+
+        async def _warn_no_pcm_soon() -> None:
+            await asyncio.sleep(5.0)
+            if pcm_stats["received"] == 0 and not stop_event.is_set():
+                logger.warning(
+                    "No PCM bytes received from client after 5s (session still open; check client mic)",
+                )
+
+        no_pcm_warn_task = asyncio.create_task(_warn_no_pcm_soon())
+
         # Drain loop: non-blocking (enqueue only).
         while True:
             pcm_chunk = await websocket.receive_bytes()
             if stop_event.is_set():
                 break
+            pcm_stats["received"] += 1
+            n = pcm_stats["received"]
+            if n <= 3 or n % 100 == 0:
+                logger.info("Received PCM chunk #%s size=%s", n, len(pcm_chunk))
             try:
                 pcm_queue.put_nowait(pcm_chunk)
             except queue.Full:
@@ -330,6 +379,8 @@ async def translate_stream_websocket(websocket: WebSocket) -> None:
     except Exception as e:
         logger.exception("WebSocket session error: %s", e)
     finally:
+        if no_pcm_warn_task is not None and not no_pcm_warn_task.done():
+            no_pcm_warn_task.cancel()
         stop_event.set()
         try:
             pcm_queue.put_nowait(None)

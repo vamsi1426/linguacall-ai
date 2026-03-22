@@ -1,2 +1,7 @@
 ai_backend/google_key.json
 ai_backend/.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc

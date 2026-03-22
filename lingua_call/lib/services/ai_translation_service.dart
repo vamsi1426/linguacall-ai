@@ -29,11 +29,19 @@ class AITranslationService extends ChangeNotifier {
   StreamSubscription<Uint8List>? _micSubscription;
   StreamSubscription<dynamic>? _wsSubscription;
 
+  Timer? _pcmWatchdog;
+
   bool _isStreaming = false;
   bool get isStreaming => _isStreaming;
 
   String? _lastError;
   String? get lastError => _lastError;
+
+  /// Set when translation fails outside [startTranslationStream] (e.g. coordinator retries exhausted).
+  void setDiagnosticError(String message) {
+    _lastError = message;
+    notifyListeners();
+  }
 
   String? _sourceLang;
   String? _targetLang;
@@ -60,10 +68,11 @@ class AITranslationService extends ChangeNotifier {
       for (var attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
           debugPrint(
-            'AITranslationService: connecting to $url '
+            'AITranslationService: connecting to websocket $url '
             '(attempt $attempt/$maxAttempts, timeout ${timeout.inSeconds}s)',
           );
           final ws = await WebSocket.connect(url).timeout(timeout);
+          debugPrint('AITranslationService: websocket connected ($url)');
           return ws;
         } catch (e) {
           lastErr = e;
@@ -90,6 +99,8 @@ class AITranslationService extends ChangeNotifier {
     required String targetLang,
     bool playLocally = true,
     void Function(Uint8List pcm, int sampleRate)? onTranslatedPcm,
+    /// True when WebRTC already called `getUserMedia` — second mic capture may fail on some devices.
+    bool webRtcMicActive = false,
   }) async {
     // Idempotency: avoid reconnect if the settings match.
     if (_isStreaming &&
@@ -112,6 +123,13 @@ class AITranslationService extends ChangeNotifier {
 
     debugPrint('AITranslationService: starting ($sourceLang -> $targetLang)');
 
+    if (webRtcMicActive) {
+      debugPrint(
+        'AITranslationService: WARNING: WebRTC already holds a microphone capture; '
+        'MicStream may fail or yield silence on some Android devices. If translation stays idle, check device logs.',
+      );
+    }
+
     final micOk = await _ensureMicPermission();
     if (!micOk) {
       _lastError = 'Microphone permission denied.';
@@ -126,6 +144,7 @@ class AITranslationService extends ChangeNotifier {
     await _setupPcmPlayer(sampleRate: _playbackSampleRate);
 
     // Try multiple backend URLs; retry each (Render cold start / flaky mobile data).
+    debugPrint('AITranslationService: opening translation websocket…');
     final ws = await _openTranslationWebSocket();
     if (ws == null) {
       final lastErr = _lastTranslationConnectError;
@@ -146,7 +165,7 @@ class AITranslationService extends ChangeNotifier {
       (data) async {
         // Server can send metadata messages as JSON strings.
         if (data is String) {
-          debugPrint('AITranslationService: server text: $data');
+          debugPrint('AITranslationService: websocket server text: $data');
           return;
         }
 
@@ -184,7 +203,10 @@ class AITranslationService extends ChangeNotifier {
         }
         _receivedChunkCount++;
         if (_receivedChunkCount <= 5 || _receivedChunkCount % 10 == 0) {
-          debugPrint('AITranslationService: received translated audio chunk $_receivedChunkCount (pcmBytes=${decoded.pcmBytes.length}, sr=${decoded.sampleRate})');
+          debugPrint(
+            'AITranslationService: received translated audio chunk #$_receivedChunkCount '
+            '(pcmBytes=${decoded.pcmBytes.length}, sr=${decoded.sampleRate})',
+          );
         }
         // Critical: flutter_pcm_sound only schedules the next feed callback after a
         // successful feed(). If the first onFeed(0) ran while the queue was still
@@ -193,15 +215,14 @@ class AITranslationService extends ChangeNotifier {
       },
       onError: (e) async {
         _lastError = 'Translation websocket error: $e';
-        debugPrint('AITranslationService: $_lastError');
+        debugPrint('AITranslationService: websocket error: $_lastError');
         await stopTranslationStream();
       },
       onDone: () async {
         final code = _webSocket?.closeCode;
         final reason = _webSocket?.closeReason;
         debugPrint(
-          'AITranslationService: translation websocket closed. '
-          'closeCode=$code closeReason=$reason',
+          'AITranslationService: websocket closed (closeCode=$code closeReason=$reason)',
         );
         if (_isStreaming) {
           _lastError = AppConfig.profile == 'prod'
@@ -216,15 +237,24 @@ class AITranslationService extends ChangeNotifier {
       },
     );
 
-    // 1) Send start JSON control message.
+    // 1) Send start JSON immediately after the socket listener is attached.
     final startPayload = <String, dynamic>{
       'type': 'start',
       'source': sourceLang,
       'target': targetLang,
       'enabled': true,
     };
-    debugPrint('AITranslationService: sending start json: $startPayload');
-    _webSocket!.add(jsonEncode(startPayload));
+    debugPrint('AITranslationService: sending start JSON: $startPayload');
+    try {
+      _webSocket!.add(jsonEncode(startPayload));
+      debugPrint('AITranslationService: start JSON sent');
+    } catch (e, st) {
+      debugPrint('AITranslationService: FAILED to send start JSON: $e\n$st');
+      _lastError = 'Failed to send start message to translation server: $e';
+      notifyListeners();
+      await stopTranslationStream();
+      throw StateError(_lastError!);
+    }
 
     // 2) Start capturing mic and stream PCM chunks.
     _micBuffer.clear();
@@ -236,35 +266,66 @@ class AITranslationService extends ChangeNotifier {
     _isStreaming = true;
     notifyListeners();
 
-    _micSubscription = MicStream.microphone(
-      audioSource: AudioSource.DEFAULT,
-      sampleRate: _sampleRate,
-      channelConfig: ChannelConfig.CHANNEL_IN_MONO,
-      audioFormat: AudioFormat.ENCODING_PCM_16BIT,
-    ).listen(
-      (Uint8List chunk) {
-        if (!_isStreaming) return;
+    var pcmChunksSent = 0;
+    _pcmWatchdog?.cancel();
+    _pcmWatchdog = Timer(const Duration(seconds: 1), () {
+      if (!_isStreaming) return;
+      if (pcmChunksSent == 0) {
+        debugPrint(
+          'AITranslationService: WARNING: no PCM chunks sent to websocket within 1s '
+          '(mic blocked, permission issue, or WebRTC mic conflict)',
+        );
+      }
+    });
 
-        // mic_stream gives raw PCM bytes; chunk boundaries are not guaranteed.
-        _micBuffer.addAll(chunk);
+    try {
+      _micSubscription = MicStream.microphone(
+        audioSource: AudioSource.DEFAULT,
+        sampleRate: _sampleRate,
+        channelConfig: ChannelConfig.CHANNEL_IN_MONO,
+        audioFormat: AudioFormat.ENCODING_PCM_16BIT,
+      ).listen(
+        (Uint8List chunk) {
+          if (!_isStreaming) return;
 
-        // Keep chunk sizes stable: 500ms -> _chunkBytes bytes.
-        while (_micBuffer.length >= _chunkBytes) {
-          final out = Uint8List.fromList(_micBuffer.sublist(0, _chunkBytes));
-          _micBuffer.removeRange(0, _chunkBytes);
-          _webSocket?.add(out);
-        }
-      },
-      onError: (Object e) async {
-        _lastError = 'Mic stream error: $e';
-        debugPrint('AITranslationService: $_lastError');
-        await stopTranslationStream();
-      },
-    );
+          // mic_stream gives raw PCM bytes; chunk boundaries are not guaranteed.
+          _micBuffer.addAll(chunk);
+
+          // Keep chunk sizes stable: 500ms -> _chunkBytes bytes.
+          while (_micBuffer.length >= _chunkBytes) {
+            final out = Uint8List.fromList(_micBuffer.sublist(0, _chunkBytes));
+            _micBuffer.removeRange(0, _chunkBytes);
+            pcmChunksSent++;
+            if (pcmChunksSent <= 3 || pcmChunksSent % 50 == 0) {
+              debugPrint(
+                'AITranslationService: sending PCM chunk #$pcmChunksSent (${out.length} bytes)',
+              );
+            }
+            _webSocket?.add(out);
+          }
+        },
+        onError: (Object e) async {
+          _lastError = 'Mic stream error: $e';
+          debugPrint('AITranslationService: mic stream FAILED: $_lastError');
+          notifyListeners();
+          await stopTranslationStream();
+        },
+      );
+      debugPrint('AITranslationService: mic stream started (subscription active)');
+    } catch (e, st) {
+      debugPrint('AITranslationService: mic stream start FAILED: $e\n$st');
+      _lastError = 'Could not start microphone capture: $e';
+      notifyListeners();
+      await stopTranslationStream();
+      rethrow;
+    }
   }
 
   Future<void> stopTranslationStream({bool notify = true}) async {
     if (!_isStreaming && _webSocket == null && _micSubscription == null) return;
+
+    _pcmWatchdog?.cancel();
+    _pcmWatchdog = null;
 
     _isStreaming = false;
     if (notify) {
