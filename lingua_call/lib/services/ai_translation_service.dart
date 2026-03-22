@@ -120,6 +120,7 @@ class AITranslationService extends ChangeNotifier {
     _onTranslatedPcm = onTranslatedPcm;
     _receivedChunkCount = 0;
     _fedChunkCount = 0;
+    _remotePcmDropLog = 0;
 
     debugPrint('AITranslationService: starting ($sourceLang -> $targetLang)');
 
@@ -136,6 +137,13 @@ class AITranslationService extends ChangeNotifier {
       notifyListeners();
       throw StateError(_lastError ?? 'Microphone permission denied.');
     }
+
+    // Start speaker pipeline **before** WebSocket connect so WebRTC can play peer
+    // translated audio while the translation socket is still handshaking.
+    await _configurePlaybackAudioSession();
+    await _setupPcmPlayer(sampleRate: _playbackSampleRate);
+    _playbackActive = true;
+    FlutterPcmSound.start();
 
     // Connect and send start JSON before heavy audio setup so the server’s first
     // message is not delayed (avoids spurious “no start JSON” closes on slow devices).
@@ -251,15 +259,9 @@ class AITranslationService extends ChangeNotifier {
       throw StateError(_lastError!);
     }
 
-    // Incoming translated audio + local speaker path (after contract handshake).
-    await _configurePlaybackAudioSession();
-    await _setupPcmPlayer(sampleRate: _playbackSampleRate);
-
     // Mic capture + PCM streaming to backend.
     _micBuffer.clear();
     _pcmQueue.clear();
-    _playbackActive = true;
-    FlutterPcmSound.start();
 
     // Mark streaming before mic chunks arrive.
     _isStreaming = true;
@@ -360,9 +362,19 @@ class AITranslationService extends ChangeNotifier {
     _onTranslatedPcm = null;
   }
 
+  static int _remotePcmDropLog = 0;
+
   /// PCM16 mono from the remote peer (post-translation), played like TTS output.
   void feedRemoteTranslatedPcm(Uint8List pcmBytes) {
-    if (!_playbackActive) return;
+    if (!_playbackActive) {
+      if (_remotePcmDropLog < 6) {
+        debugPrint(
+          'AITranslationService: dropped remote PCM (${pcmBytes.length} b) — playback not ready yet',
+        );
+      }
+      _remotePcmDropLog++;
+      return;
+    }
     _pcmQueue.add(pcmBytes);
     unawaited(_feedNextPcmChunk());
   }

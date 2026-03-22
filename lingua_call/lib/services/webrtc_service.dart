@@ -31,6 +31,11 @@ class WebRtcService {
   /// SCTP often caps a single binary message (~64KB). Split larger PCM.
   static const int _maxDcBinaryBytes = 16384;
 
+  /// While DTLS/SCTP connects, translated PCM may arrive before [RTCDataChannelOpen].
+  final List<Uint8List> _pendingPcmOut = <Uint8List>[];
+  static const int _maxPendingPcmChunks = 48;
+  int _skippedSendLogCount = 0;
+
   Future<RTCPeerConnection> initPeerConnection() async {
     final configuration = <String, dynamic>{
       'sdpSemantics': 'unified-plan',
@@ -143,8 +148,25 @@ class WebRtcService {
   Future<void> sendPcmBytes(Uint8List pcm) async {
     final dc = _dataChannel;
     if (dc == null || dc.state != RTCDataChannelState.RTCDataChannelOpen) {
+      if (_pendingPcmOut.length < _maxPendingPcmChunks) {
+        _pendingPcmOut.add(Uint8List.fromList(pcm));
+      }
+      if (_skippedSendLogCount < 8 || _skippedSendLogCount % 30 == 0) {
+        debugPrint(
+          'WebRtcService: PCM held until data channel open '
+          '(dc=${dc == null ? "null" : dc.state} pendingChunks=${_pendingPcmOut.length} '
+          'pcmBytes=${pcm.length})',
+        );
+      }
+      _skippedSendLogCount++;
       return;
     }
+    await _sendPcmInternal(pcm);
+  }
+
+  Future<void> _sendPcmInternal(Uint8List pcm) async {
+    final dc = _dataChannel;
+    if (dc == null) return;
     try {
       var offset = 0;
       while (offset < pcm.length) {
@@ -160,21 +182,43 @@ class WebRtcService {
     }
   }
 
+  Future<void> _flushPendingPcmOut() async {
+    if (_dataChannel?.state != RTCDataChannelState.RTCDataChannelOpen) return;
+    if (_pendingPcmOut.isEmpty) return;
+    debugPrint('WebRtcService: flushing ${_pendingPcmOut.length} pending PCM chunk(s)');
+    while (_pendingPcmOut.isNotEmpty) {
+      final pcm = _pendingPcmOut.removeAt(0);
+      await _sendPcmInternal(pcm);
+    }
+  }
+
   void _wireDataChannel(RTCDataChannel channel) {
     _dataChannel = channel;
 
     channel.onDataChannelState = (RTCDataChannelState state) {
       debugPrint('WebRtcService: dataChannel state=$state label=${channel.label}');
+      if (state == RTCDataChannelState.RTCDataChannelOpen) {
+        unawaited(_flushPendingPcmOut());
+      }
       onDataChannelState?.call(state);
     };
 
+    var rxLog = 0;
     channel.onMessage = (RTCDataChannelMessage message) {
       if (!message.isBinary) return;
+      if (rxLog < 12 || rxLog % 50 == 0) {
+        debugPrint(
+          'WebRtcService: received binary PCM from peer (${message.binary.length} bytes)',
+        );
+      }
+      rxLog++;
       onRemotePcm?.call(message.binary);
     };
   }
 
   Future<void> dispose() async {
+    _pendingPcmOut.clear();
+    _skippedSendLogCount = 0;
     try {
       await _dataChannel?.close();
     } catch (_) {}
