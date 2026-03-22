@@ -10,10 +10,10 @@ class DialpadScreen extends StatefulWidget {
   const DialpadScreen({super.key});
 
   @override
-  _DialpadScreenState createState() => _DialpadScreenState();
+  State<DialpadScreen> createState() => DialpadScreenState();
 }
 
-class _DialpadScreenState extends State<DialpadScreen> {
+class DialpadScreenState extends State<DialpadScreen> {
   String _number = '';
   CallType _callType = CallType.voice;
 
@@ -85,7 +85,6 @@ class _DialpadScreenState extends State<DialpadScreen> {
                     if (phone.isEmpty) return;
 
                     final docId = '${uid}_$phone';
-                    // Attempt to link the contact to a known user by phone.
                     String contactUid = '';
                     try {
                       final userSnap = await FirebaseFirestore.instance
@@ -96,9 +95,7 @@ class _DialpadScreenState extends State<DialpadScreen> {
                       if (userSnap.docs.isNotEmpty) {
                         contactUid = userSnap.docs.first.id;
                       }
-                    } catch (_) {
-                      // If query fails (e.g., indexing), we still save the contact.
-                    }
+                    } catch (_) {}
 
                     await FirebaseFirestore.instance.collection('contacts').doc(docId).set(
                       {
@@ -139,13 +136,13 @@ class _DialpadScreenState extends State<DialpadScreen> {
     );
   }
 
-  Widget _buildButton(String title, String subtitle) {
+  Widget _buildButton(String title, String subtitle, double size, double fontSize, double subSize) {
     return InkWell(
       onTap: () => _onKeyPress(title),
-      borderRadius: BorderRadius.circular(40),
+      borderRadius: BorderRadius.circular(size / 2),
       child: Container(
-        width: 80,
-        height: 80,
+        width: size,
+        height: size,
         decoration: const BoxDecoration(
           color: AppTheme.cardColor,
           shape: BoxShape.circle,
@@ -153,9 +150,9 @@ class _DialpadScreenState extends State<DialpadScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(title, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w600, color: Colors.white)),
+            Text(title, style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600, color: Colors.white)),
             if (subtitle.isNotEmpty)
-              Text(subtitle, style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+              Text(subtitle, style: TextStyle(fontSize: subSize, color: AppTheme.textMuted)),
           ],
         ),
       ),
@@ -164,118 +161,134 @@ class _DialpadScreenState extends State<DialpadScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        GestureDetector(
-          onLongPress: _onLongPressNumber,
-          child: Container(
-            padding: const EdgeInsets.all(20),
-            child: Text(
-              _number,
-              style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold, letterSpacing: 2),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final h = constraints.maxHeight;
+        final w = constraints.maxWidth;
+        final compact = h < 520 || w < 340;
+        final keySize = compact ? 64.0 : 76.0;
+        final keyFont = compact ? 22.0 : 26.0;
+        final subFont = compact ? 9.0 : 11.0;
+        final rowGap = compact ? 8.0 : 12.0;
+        final hPad = compact ? 16.0 : 28.0;
+        final displaySize = compact ? 28.0 : 34.0;
+        final callSize = compact ? 68.0 : 78.0;
+
+        Widget row(List<Widget> children) => Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: children,
+            );
+
+        return SingleChildScrollView(
+          padding: EdgeInsets.only(
+            left: hPad,
+            right: hPad,
+            top: 8,
+            bottom: MediaQuery.of(context).padding.bottom + 12,
+          ),
+          physics: const BouncingScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight - 8),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GestureDetector(
+                  onLongPress: _onLongPressNumber,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      _number.isEmpty ? ' ' : _number,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: displaySize,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: compact ? 8 : 12),
+                row([
+                  _buildButton('1', '', keySize, keyFont, subFont),
+                  _buildButton('2', 'ABC', keySize, keyFont, subFont),
+                  _buildButton('3', 'DEF', keySize, keyFont, subFont),
+                ]),
+                SizedBox(height: rowGap),
+                row([
+                  _buildButton('4', 'GHI', keySize, keyFont, subFont),
+                  _buildButton('5', 'JKL', keySize, keyFont, subFont),
+                  _buildButton('6', 'MNO', keySize, keyFont, subFont),
+                ]),
+                SizedBox(height: rowGap),
+                row([
+                  _buildButton('7', 'PQRS', keySize, keyFont, subFont),
+                  _buildButton('8', 'TUV', keySize, keyFont, subFont),
+                  _buildButton('9', 'WXYZ', keySize, keyFont, subFont),
+                ]),
+                SizedBox(height: rowGap),
+                row([
+                  _buildButton('*', '', keySize, keyFont, subFont),
+                  _buildButton('0', '+', keySize, keyFont, subFont),
+                  _buildButton('#', '', keySize, keyFont, subFont),
+                ]),
+                SizedBox(height: compact ? 16 : 22),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    SizedBox(width: callSize),
+                    GestureDetector(
+                      onTap: _onCall,
+                      child: Container(
+                        width: callSize,
+                        height: callSize,
+                        decoration: const BoxDecoration(
+                          color: Colors.green,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(color: Colors.greenAccent, blurRadius: 12, spreadRadius: 1),
+                          ],
+                        ),
+                        child: Icon(Icons.call, color: Colors.white, size: callSize * 0.45),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: _onDelete,
+                      onLongPress: () => setState(() => _number = ''),
+                      child: SizedBox(
+                        width: callSize,
+                        height: callSize,
+                        child: Icon(Icons.backspace_outlined, color: AppTheme.textMuted, size: callSize * 0.35),
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: compact ? 8 : 10),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    ChoiceChip(
+                      selected: _callType == CallType.voice,
+                      label: const Text('Voice'),
+                      onSelected: (_) => setState(() => _callType = CallType.voice),
+                    ),
+                    ChoiceChip(
+                      selected: _callType == CallType.video,
+                      label: const Text('Video'),
+                      onSelected: (_) => setState(() => _callType = CallType.video),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
             ),
           ),
-        ),
-        const SizedBox(height: 20),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _buildButton('1', ''),
-                  _buildButton('2', 'ABC'),
-                  _buildButton('3', 'DEF'),
-                ],
-              ),
-              const SizedBox(height: 15),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _buildButton('4', 'GHI'),
-                  _buildButton('5', 'JKL'),
-                  _buildButton('6', 'MNO'),
-                ],
-              ),
-              const SizedBox(height: 15),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _buildButton('7', 'PQRS'),
-                  _buildButton('8', 'TUV'),
-                  _buildButton('9', 'WXYZ'),
-                ],
-              ),
-              const SizedBox(height: 15),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _buildButton('*', ''),
-                  _buildButton('0', '+'),
-                  _buildButton('#', ''),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 30),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const SizedBox(width: 80),
-              GestureDetector(
-                onTap: _onCall,
-                child: Container(
-                  width: 80,
-                  height: 80,
-                  decoration: const BoxDecoration(
-                    color: Colors.green,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(color: Colors.greenAccent, blurRadius: 15, spreadRadius: 2),
-                    ],
-                  ),
-                  child: const Icon(Icons.call, color: Colors.white, size: 36),
-                ),
-              ),
-              GestureDetector(
-                onTap: _onDelete,
-                onLongPress: () => setState(() => _number = ''),
-                child: const SizedBox(
-                   width: 80,
-                   height: 80,
-                   child: Icon(Icons.backspace_outlined, color: AppTheme.textMuted, size: 28),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ChoiceChip(
-                selected: _callType == CallType.voice,
-                label: const Text('Voice'),
-                onSelected: (_) => setState(() => _callType = CallType.voice),
-              ),
-              const SizedBox(width: 12),
-              ChoiceChip(
-                selected: _callType == CallType.video,
-                label: const Text('Video'),
-                onSelected: (_) => setState(() => _callType = CallType.video),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 40),
-      ],
+        );
+      },
     );
   }
 }

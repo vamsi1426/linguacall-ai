@@ -34,6 +34,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   bool _didNavigateToConnectedScreen = false;
   /// Prevents duplicate `accept-call` emits (seen as many lines in Render logs).
   bool _acceptDispatched = false;
+  /// True while WebRTC/mic is being prepared (shows spinner on green button).
+  bool _acceptBusy = false;
   late final VoidCallback _listener;
   late final CallStateService _callState;
   late final SignalingService _signaling;
@@ -93,10 +95,12 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   @override
   void dispose() {
     final cs = _callState;
+    // Only auto-reject if still ringing. If already "connecting", accept was sent —
+    // rejecting here would tear down a live negotiation (felt like "tap cuts call").
     if (widget.callerUid != null &&
         AppConfig.realtimeCallingEnabled &&
         widget.callType == CallType.voice &&
-        (cs.phase == CallPhase.ringing || cs.phase == CallPhase.connecting)) {
+        cs.phase == CallPhase.ringing) {
       _signaling.rejectCall(widget.callerUid!);
       unawaited(cs.endCall(reason: 'missed'));
       unawaited(_coordinator.endRealtimeSession());
@@ -106,7 +110,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   }
 
   Future<void> _accept() async {
-    if (_acceptDispatched) return;
+    if (_acceptDispatched || _acceptBusy) return;
     final callState = _callState;
     if (callState.phase != CallPhase.ringing) return;
 
@@ -114,17 +118,16 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
         AppConfig.realtimeCallingEnabled &&
         widget.callType == CallType.voice;
 
-    _acceptDispatched = true;
-
     if (realtime) {
+      setState(() => _acceptBusy = true);
       try {
         final coordinator = context.read<RealtimeCallCoordinator>();
         final signaling = context.read<SignalingService>();
         await coordinator.prepareCalleeSession(widget.callerUid!);
+        _acceptDispatched = true;
         signaling.acceptCall(widget.callerUid!);
         await callState.acceptIncomingCall(realtime: true);
       } catch (e) {
-        _acceptDispatched = false;
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -132,8 +135,11 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
             backgroundColor: Colors.red.shade900,
           ),
         );
+      } finally {
+        if (mounted) setState(() => _acceptBusy = false);
       }
     } else {
+      _acceptDispatched = true;
       await callState.acceptIncomingCall();
     }
   }
@@ -189,7 +195,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                       children: [
                         // Accept
                         InkWell(
-                          onTap: () => unawaited(_accept()),
+                          onTap: (_acceptBusy || _acceptDispatched)
+                              ? null
+                              : () => unawaited(_accept()),
                           borderRadius: BorderRadius.circular(999),
                           child: Container(
                             width: 86,
@@ -205,20 +213,30 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                                 )
                               ],
                             ),
-                            child: const Icon(Icons.call, color: Colors.white, size: 34),
+                            child: _acceptBusy
+                                ? const Padding(
+                                    padding: EdgeInsets.all(22),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 3,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.call, color: Colors.white, size: 34),
                           ),
                         ),
                         const SizedBox(width: 24),
                         // Reject
                         InkWell(
-                          onTap: () {
-                            if (widget.callerUid != null &&
-                                AppConfig.realtimeCallingEnabled &&
-                                widget.callType == CallType.voice) {
-                              _signaling.rejectCall(widget.callerUid!);
-                            }
-                            callState.rejectIncomingCall();
-                          },
+                          onTap: _acceptBusy
+                              ? null
+                              : () {
+                                  if (widget.callerUid != null &&
+                                      AppConfig.realtimeCallingEnabled &&
+                                      widget.callType == CallType.voice) {
+                                    _signaling.rejectCall(widget.callerUid!);
+                                  }
+                                  callState.rejectIncomingCall();
+                                },
                           borderRadius: BorderRadius.circular(999),
                           child: Container(
                             width: 86,
