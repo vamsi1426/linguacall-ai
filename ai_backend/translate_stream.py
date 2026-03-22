@@ -4,6 +4,7 @@ import logging
 import queue
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Optional
 
@@ -337,9 +338,10 @@ async def translate_stream_websocket(websocket: WebSocket) -> None:
       3) Send ONLY binary WAV bytes back after each STT->Translate->TTS pipeline step.
     """
     await websocket.accept()
+    cid = uuid.uuid4().hex[:8]
     # Always visible on hosts that don't propagate app loggers to stdout.
-    print("linguacall: translate-stream WebSocket accepted", flush=True)
-    logger.info("WebSocket accepted: /ws/translate-stream")
+    print(f"linguacall: translate-stream WebSocket accepted cid={cid}", flush=True)
+    logger.info("WebSocket accepted: /ws/translate-stream cid=%s", cid)
 
     stop_event = threading.Event()
     pcm_queue: "queue.Queue[Optional[bytes]]" = queue.Queue(maxsize=100)
@@ -350,9 +352,12 @@ async def translate_stream_websocket(websocket: WebSocket) -> None:
 
     try:
         try:
-            start_text = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
+            start_text = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
         except asyncio.TimeoutError:
-            logger.warning("No start JSON received within 15s after accept; closing")
+            logger.warning(
+                "No start JSON received within 30s after accept (cid=%s); closing orphan socket",
+                cid,
+            )
             await websocket.close(code=1008)
             return
 

@@ -29,6 +29,11 @@ class AITranslationService extends ChangeNotifier {
   StreamSubscription<Uint8List>? _micSubscription;
   StreamSubscription<dynamic>? _wsSubscription;
 
+  /// Serializes [startTranslationStream] so concurrent callers (e.g. DC open + language update)
+  /// do not interleave [stopTranslationStream] with another connect — that orphans server sockets
+  /// and triggers "No start JSON within 15s" on the abandoned connection.
+  Future<void> _translationStartChain = Future<void>.value();
+
   Timer? _pcmWatchdog;
 
   bool _isStreaming = false;
@@ -107,6 +112,30 @@ class AITranslationService extends ChangeNotifier {
     bool playLocally = true,
     void Function(Uint8List pcm, int sampleRate)? onTranslatedPcm,
     /// True when WebRTC already called `getUserMedia` — second mic capture may fail on some devices.
+    bool webRtcMicActive = false,
+  }) async {
+    final prev = _translationStartChain;
+    final gate = Completer<void>();
+    _translationStartChain = gate.future;
+    await prev;
+    try {
+      await _startTranslationStreamImpl(
+        sourceLang: sourceLang,
+        targetLang: targetLang,
+        playLocally: playLocally,
+        onTranslatedPcm: onTranslatedPcm,
+        webRtcMicActive: webRtcMicActive,
+      );
+    } finally {
+      gate.complete();
+    }
+  }
+
+  Future<void> _startTranslationStreamImpl({
+    required String sourceLang,
+    required String targetLang,
+    bool playLocally = true,
+    void Function(Uint8List pcm, int sampleRate)? onTranslatedPcm,
     bool webRtcMicActive = false,
   }) async {
     // Idempotency: avoid reconnect if the settings match.

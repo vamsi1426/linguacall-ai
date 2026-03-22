@@ -30,8 +30,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
+    """GET returns JSON; HEAD returns 200 with no body (Render health checks use HEAD)."""
     return {"status": "AI Translation Backend running"}
 
 @app.websocket("/ws/translate")
