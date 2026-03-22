@@ -90,6 +90,9 @@ class AITranslationService extends ChangeNotifier {
   // Playback: flutter_pcm_sound feeds from a callback. We queue PCM frames (no WAV headers).
   final Queue<Uint8List> _pcmQueue = Queue<Uint8List>();
   bool _playbackActive = false;
+
+  /// Serializes remote DC PCM so rate switches complete before the next chunk is queued.
+  Future<void>? _remotePcmSerial;
   int _playbackSampleRate = _sampleRate;
   int _receivedChunkCount = 0;
   int _fedChunkCount = 0;
@@ -350,6 +353,7 @@ class AITranslationService extends ChangeNotifier {
     _micBuffer.clear();
     _pcmQueue.clear();
 
+    _remotePcmSerial = null;
     _playbackActive = false;
 
     try {
@@ -365,7 +369,7 @@ class AITranslationService extends ChangeNotifier {
   static int _remotePcmDropLog = 0;
 
   /// PCM16 mono from the remote peer (post-translation), played like TTS output.
-  void feedRemoteTranslatedPcm(Uint8List pcmBytes) {
+  void feedRemoteTranslatedPcm(Uint8List pcmBytes, {int sampleRate = 16000}) {
     if (!_playbackActive) {
       if (_remotePcmDropLog < 6) {
         debugPrint(
@@ -375,8 +379,24 @@ class AITranslationService extends ChangeNotifier {
       _remotePcmDropLog++;
       return;
     }
+    _remotePcmSerial = (_remotePcmSerial ?? Future<void>.value()).then((_) async {
+      await _enqueueRemotePcm(pcmBytes, sampleRate);
+    }).catchError((Object e, StackTrace st) {
+      debugPrint('AITranslationService: remote PCM chain error: $e\n$st');
+    });
+  }
+
+  Future<void> _enqueueRemotePcm(Uint8List pcmBytes, int sampleRate) async {
+    if (!_playbackActive) return;
+    if (sampleRate != _playbackSampleRate) {
+      debugPrint(
+        'AITranslationService: remote PCM reconfigure sampleRate $_playbackSampleRate -> $sampleRate',
+      );
+      await _setupPcmPlayer(sampleRate: sampleRate);
+    }
+    if (!_playbackActive) return;
     _pcmQueue.add(pcmBytes);
-    unawaited(_feedNextPcmChunk());
+    await _feedNextPcmChunk();
   }
 
   /// Prepares playback for a realtime call before [startTranslationStream] (optional).

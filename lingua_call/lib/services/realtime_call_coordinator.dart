@@ -146,8 +146,8 @@ class RealtimeCallCoordinator extends ChangeNotifier {
     }
   }
 
-  void _onRemotePcm(Uint8List pcm) {
-    translation.feedRemoteTranslatedPcm(pcm);
+  void _onRemotePcm(Uint8List pcm, int sampleRate) {
+    translation.feedRemoteTranslatedPcm(pcm, sampleRate: sampleRate);
   }
 
   Future<void> _startTranslation() async {
@@ -165,7 +165,7 @@ class RealtimeCallCoordinator extends ChangeNotifier {
           playLocally: false,
           webRtcMicActive: false,
           onTranslatedPcm: (pcm, sampleRate) {
-            _webrtc?.sendPcmBytes(pcm);
+            _webrtc?.sendPcmBytes(pcm, sampleRate: sampleRate);
           },
         );
         debugPrint('Realtime: translation started successfully');
@@ -199,7 +199,7 @@ class RealtimeCallCoordinator extends ChangeNotifier {
         playLocally: false,
         webRtcMicActive: false,
         onTranslatedPcm: (pcm, sampleRate) {
-          _webrtc?.sendPcmBytes(pcm);
+          _webrtc?.sendPcmBytes(pcm, sampleRate: sampleRate);
         },
       );
     } catch (e, st) {
@@ -225,7 +225,7 @@ class RealtimeCallCoordinator extends ChangeNotifier {
         playLocally: false,
         webRtcMicActive: false,
         onTranslatedPcm: (pcm, sampleRate) {
-          _webrtc?.sendPcmBytes(pcm);
+          _webrtc?.sendPcmBytes(pcm, sampleRate: sampleRate);
         },
       );
       debugPrint('Realtime: translation started successfully (resume)');

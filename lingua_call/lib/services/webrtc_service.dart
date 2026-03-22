@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+/// DC binary frame: [uint32 LE sampleRate][PCM16 mono bytes]
+const int _kDcPcmHeaderBytes = 4;
+
 /// WebRTC peer connection for LinguaCall voice sessions.
 ///
 /// Audio to the remote peer is carried **translated PCM16** over a
@@ -24,15 +27,19 @@ class WebRtcService {
   void Function(RTCIceCandidate candidate)? onIceCandidate;
   void Function(RTCPeerConnectionState state)? onConnectionState;
   void Function(RTCDataChannelState state)? onDataChannelState;
-  void Function(Uint8List pcm)? onRemotePcm;
+  /// PCM16 mono from peer; [sampleRate] Hz (from sender WAV decode).
+  void Function(Uint8List pcm, int sampleRate)? onRemotePcm;
 
   static const String dataChannelLabel = 'translate-audio';
 
   /// SCTP often caps a single binary message (~64KB). Split larger PCM.
   static const int _maxDcBinaryBytes = 16384;
 
+  /// Max PCM bytes per SCTP message after header.
+  int get _maxPcmPayloadPerMessage => _maxDcBinaryBytes - _kDcPcmHeaderBytes;
+
   /// While DTLS/SCTP connects, translated PCM may arrive before [RTCDataChannelOpen].
-  final List<Uint8List> _pendingPcmOut = <Uint8List>[];
+  final List<_PendingOutPcm> _pendingPcmOut = <_PendingOutPcm>[];
   static const int _maxPendingPcmChunks = 48;
   int _skippedSendLogCount = 0;
 
@@ -145,36 +152,40 @@ class WebRtcService {
     await _pc!.addCandidate(candidate);
   }
 
-  Future<void> sendPcmBytes(Uint8List pcm) async {
+  /// Sends PCM16 mono with a leading sample-rate tag so the peer can configure playback.
+  Future<void> sendPcmBytes(Uint8List pcm, {int sampleRate = 16000}) async {
     final dc = _dataChannel;
     if (dc == null || dc.state != RTCDataChannelState.RTCDataChannelOpen) {
       if (_pendingPcmOut.length < _maxPendingPcmChunks) {
-        _pendingPcmOut.add(Uint8List.fromList(pcm));
+        _pendingPcmOut.add(_PendingOutPcm(Uint8List.fromList(pcm), sampleRate));
       }
       if (_skippedSendLogCount < 8 || _skippedSendLogCount % 30 == 0) {
         debugPrint(
           'WebRtcService: PCM held until data channel open '
           '(dc=${dc == null ? "null" : dc.state} pendingChunks=${_pendingPcmOut.length} '
-          'pcmBytes=${pcm.length})',
+          'pcmBytes=${pcm.length} sr=$sampleRate)',
         );
       }
       _skippedSendLogCount++;
       return;
     }
-    await _sendPcmInternal(pcm);
+    await _sendPcmInternal(pcm, sampleRate);
   }
 
-  Future<void> _sendPcmInternal(Uint8List pcm) async {
+  Future<void> _sendPcmInternal(Uint8List pcm, int sampleRate) async {
     final dc = _dataChannel;
     if (dc == null) return;
     try {
+      final pcmMax = _maxPcmPayloadPerMessage;
       var offset = 0;
       while (offset < pcm.length) {
-        final end = offset + _maxDcBinaryBytes < pcm.length
-            ? offset + _maxDcBinaryBytes
-            : pcm.length;
-        final slice = Uint8List.sublistView(pcm, offset, end);
-        await dc.send(RTCDataChannelMessage.fromBinary(slice));
+        final end = offset + pcmMax < pcm.length ? offset + pcmMax : pcm.length;
+        final sliceLen = end - offset;
+        final packet = Uint8List(_kDcPcmHeaderBytes + sliceLen);
+        final bd = ByteData.sublistView(packet);
+        bd.setUint32(0, sampleRate, Endian.little);
+        packet.setRange(_kDcPcmHeaderBytes, _kDcPcmHeaderBytes + sliceLen, pcm, offset);
+        await dc.send(RTCDataChannelMessage.fromBinary(packet));
         offset = end;
       }
     } catch (e, st) {
@@ -187,8 +198,8 @@ class WebRtcService {
     if (_pendingPcmOut.isEmpty) return;
     debugPrint('WebRtcService: flushing ${_pendingPcmOut.length} pending PCM chunk(s)');
     while (_pendingPcmOut.isNotEmpty) {
-      final pcm = _pendingPcmOut.removeAt(0);
-      await _sendPcmInternal(pcm);
+      final p = _pendingPcmOut.removeAt(0);
+      await _sendPcmInternal(p.pcm, p.sampleRate);
     }
   }
 
@@ -206,13 +217,16 @@ class WebRtcService {
     var rxLog = 0;
     channel.onMessage = (RTCDataChannelMessage message) {
       if (!message.isBinary) return;
+      final bytes = message.binary;
+      final parsed = _parseDcPcmMessage(bytes);
       if (rxLog < 12 || rxLog % 50 == 0) {
         debugPrint(
-          'WebRtcService: received binary PCM from peer (${message.binary.length} bytes)',
+          'WebRtcService: received PCM from peer (${bytes.length} b, sr=${parsed.rate}, '
+          'pcm=${parsed.pcm.length} b, framed=${parsed.framed})',
         );
       }
       rxLog++;
-      onRemotePcm?.call(message.binary);
+      onRemotePcm?.call(parsed.pcm, parsed.rate);
     };
   }
 
@@ -238,4 +252,54 @@ class WebRtcService {
 
     _pc = null;
   }
+}
+
+class _PendingOutPcm {
+  _PendingOutPcm(this.pcm, this.sampleRate);
+  final Uint8List pcm;
+  final int sampleRate;
+}
+
+class _ParsedDcPcm {
+  _ParsedDcPcm({required this.pcm, required this.rate, required this.framed});
+  final Uint8List pcm;
+  final int rate;
+  final bool framed;
+}
+
+/// Framed: 4 bytes uint32-LE sample rate + PCM16 (even length). Legacy: raw PCM @ 16 kHz.
+_ParsedDcPcm _parseDcPcmMessage(Uint8List bytes) {
+  if (bytes.length >= _kDcPcmHeaderBytes + 2) {
+    final bd = ByteData.sublistView(bytes);
+    final sr = bd.getUint32(0, Endian.little);
+    final pcmLen = bytes.length - _kDcPcmHeaderBytes;
+    if (sr >= 6000 &&
+        sr <= 96000 &&
+        pcmLen >= 2 &&
+        pcmLen.isEven &&
+        _looksPlausibleRate(sr)) {
+      return _ParsedDcPcm(
+        pcm: bytes.sublist(_kDcPcmHeaderBytes),
+        rate: sr,
+        framed: true,
+      );
+    }
+  }
+  return _ParsedDcPcm(pcm: bytes, rate: 16000, framed: false);
+}
+
+bool _looksPlausibleRate(int sr) {
+  // Common rates; avoids mis-parsing random PCM as header.
+  const common = <int>{
+    8000,
+    11025,
+    12000,
+    16000,
+    22050,
+    24000,
+    32000,
+    44100,
+    48000,
+  };
+  return common.contains(sr);
 }
