@@ -13,6 +13,7 @@ from google.cloud import speech
 from google.cloud import translate_v2 as translate
 from google.cloud import texttospeech
 from google.api_core.exceptions import OutOfRange
+from google.cloud.speech_v1.services.speech.client import SpeechClient as GapicSpeechClient
 from audio_utils import pcm16le_to_wav_bytes
 from google_env import configure_google_application_credentials
 
@@ -295,7 +296,10 @@ def _run_translation_worker(
 
             try:
                 logger.info("Starting STT streaming session #%s", session_index)
-                responses = speech_client.streaming_recognize(
+                # Use GAPIC streaming_recognize(requests=...) — iterable's first message is
+                # streaming_config; SpeechHelpers.streaming_recognize() needs (config, requests).
+                responses = GapicSpeechClient.streaming_recognize(
+                    speech_client,
                     requests=streaming_requests(),
                 )
                 for idx, response in enumerate(responses):
