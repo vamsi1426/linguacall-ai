@@ -142,6 +142,7 @@ def _run_translation_worker(
     )
 
     wav_out_count = 0
+    stt_trace = {"first_transcript": False, "response_count": 0}
 
     def safe_send(wav_bytes: bytes) -> None:
         nonlocal wav_out_count
@@ -203,6 +204,11 @@ def _run_translation_worker(
             )
             translated_text = translation.get("translatedText", "").strip()
             if not translated_text:
+                logger.warning(
+                    "Translate returned empty text (src=%r len=%s)",
+                    transcript[:120],
+                    len(transcript),
+                )
                 return
 
             synthesis_input = texttospeech.SynthesisInput(text=translated_text)
@@ -248,7 +254,7 @@ def _run_translation_worker(
                     yield speech.StreamingRecognizeRequest(audio_content=chunk)
 
             try:
-                logger.debug("Starting STT streaming session #%s", session_index)
+                logger.info("Starting STT streaming session #%s", session_index)
                 responses = GapicSpeechClient.streaming_recognize(
                     speech_client,
                     requests=streaming_requests(),
@@ -300,9 +306,9 @@ async def translate_stream_websocket(websocket: WebSocket) -> None:
 
     try:
         try:
-            start_text = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+            start_text = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
         except asyncio.TimeoutError:
-            logger.warning("No start JSON received within 5s after accept; closing")
+            logger.warning("No start JSON received within 15s after accept; closing")
             await websocket.close(code=1008)
             return
 
