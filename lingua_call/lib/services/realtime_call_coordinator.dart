@@ -63,7 +63,6 @@ class RealtimeCallCoordinator extends ChangeNotifier {
       ..onRemotePcm = _onRemotePcm;
 
     await _webrtc!.initPeerConnection();
-    await _webrtc!.getUserMediaAudioOnly();
   }
 
   Future<void> _onCallAccepted(Map<String, dynamic> data) async {
@@ -86,7 +85,7 @@ class RealtimeCallCoordinator extends ChangeNotifier {
 
     await _webrtc!.initPeerConnection();
     await _webrtc!.createDataChannelAsCaller();
-    await _webrtc!.getUserMediaAudioOnly();
+    await _webrtc!.addRecvOnlyAudioForSignalingCompatibility();
 
     final offer = await _webrtc!.createOfferAndSetLocal();
     final peer = _remoteUid;
@@ -165,7 +164,7 @@ class RealtimeCallCoordinator extends ChangeNotifier {
           sourceLang: _sourceLang,
           targetLang: _targetLang,
           playLocally: false,
-          webRtcMicActive: true,
+          webRtcMicActive: false,
           onTranslatedPcm: (pcm, sampleRate) {
             _webrtc?.sendPcmBytes(pcm);
           },
@@ -199,7 +198,7 @@ class RealtimeCallCoordinator extends ChangeNotifier {
         sourceLang: sourceLang,
         targetLang: targetLang,
         playLocally: false,
-        webRtcMicActive: true,
+        webRtcMicActive: false,
         onTranslatedPcm: (pcm, sampleRate) {
           _webrtc?.sendPcmBytes(pcm);
         },
@@ -225,7 +224,7 @@ class RealtimeCallCoordinator extends ChangeNotifier {
         sourceLang: sourceLang,
         targetLang: targetLang,
         playLocally: false,
-        webRtcMicActive: true,
+        webRtcMicActive: false,
         onTranslatedPcm: (pcm, sampleRate) {
           _webrtc?.sendPcmBytes(pcm);
         },

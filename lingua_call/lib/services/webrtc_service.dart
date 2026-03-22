@@ -6,9 +6,13 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 /// WebRTC peer connection for LinguaCall voice sessions.
 ///
 /// Audio to the remote peer is carried **translated PCM16** over a
-/// [RTCDataChannel] (label `translate-audio`). A disabled local microphone
-/// track is attached for capture permission and SDP compatibility; real speech
-/// is not sent on that RTP track.
+/// [RTCDataChannel] (label `translate-audio`).
+///
+/// We **do not** call [getUserMedia] for the microphone here: live speech is
+/// captured by `MicStream` in the translation service and sent to the backend.
+/// Opening a second mic via WebRTC caused Android conflicts (no PCM).
+/// Instead we add a **recv-only** audio transceiver so SDP has an audio m-line
+/// without capturing the device mic.
 class WebRtcService {
   RTCPeerConnection? _pc;
   RTCDataChannel? _dataChannel;
@@ -53,7 +57,20 @@ class WebRtcService {
     return _pc!;
   }
 
-  /// Captures microphone once, adds a **disabled** audio track (silence / not used for speech).
+  /// Adds an audio m-line for SDP / ICE compatibility **without** opening the mic.
+  /// The callee path typically relies on the caller’s offer; this is mainly for the caller.
+  Future<void> addRecvOnlyAudioForSignalingCompatibility() async {
+    if (_pc == null) throw StateError('Peer connection not created');
+    await _pc!.addTransceiver(
+      kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
+      init: RTCRtpTransceiverInit(
+        direction: TransceiverDirection.RecvOnly,
+      ),
+    );
+  }
+
+  /// Legacy: captures microphone via WebRTC (conflicts with [MicStream] on Android).
+  /// Not used for realtime translation calls.
   Future<void> getUserMediaAudioOnly() async {
     if (_pc == null) throw StateError('Peer connection not created');
 

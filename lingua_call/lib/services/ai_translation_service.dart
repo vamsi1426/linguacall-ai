@@ -137,13 +137,8 @@ class AITranslationService extends ChangeNotifier {
       throw StateError(_lastError ?? 'Microphone permission denied.');
     }
 
-    // Route TTS playback to media/speech stream (helps Android volume + speaker).
-    await _configurePlaybackAudioSession();
-
-    // Setup playback (PCM). Actual sample rate is taken from decoded WAV per chunk.
-    await _setupPcmPlayer(sampleRate: _playbackSampleRate);
-
-    // Try multiple backend URLs; retry each (Render cold start / flaky mobile data).
+    // Connect and send start JSON before heavy audio setup so the server’s first
+    // message is not delayed (avoids spurious “no start JSON” closes on slow devices).
     debugPrint('AITranslationService: opening translation websocket…');
     final ws = await _openTranslationWebSocket();
     if (ws == null) {
@@ -256,7 +251,11 @@ class AITranslationService extends ChangeNotifier {
       throw StateError(_lastError!);
     }
 
-    // 2) Start capturing mic and stream PCM chunks.
+    // Incoming translated audio + local speaker path (after contract handshake).
+    await _configurePlaybackAudioSession();
+    await _setupPcmPlayer(sampleRate: _playbackSampleRate);
+
+    // Mic capture + PCM streaming to backend.
     _micBuffer.clear();
     _pcmQueue.clear();
     _playbackActive = true;
