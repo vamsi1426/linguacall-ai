@@ -142,7 +142,13 @@ class RealtimeCallCoordinator extends ChangeNotifier {
   Future<void> _onDcState(RTCDataChannelState state) async {
     if (state == RTCDataChannelState.RTCDataChannelOpen) {
       await callState.markConnectedFromRealtime();
-      await _startTranslation();
+      // Do not await: translation can block on websocket/mic; WebRTC/ICE run natively
+      // but keeping this callback short avoids any stack quirks on some devices.
+      unawaited(
+        _startTranslation().catchError((Object e, StackTrace st) {
+          debugPrint('Realtime: translation start error (call may still be connected): $e\n$st');
+        }),
+      );
     }
   }
 

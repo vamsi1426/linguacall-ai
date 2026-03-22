@@ -396,7 +396,7 @@ class AITranslationService extends ChangeNotifier {
     }
     if (!_playbackActive) return;
     _pcmQueue.add(pcmBytes);
-    await _feedNextPcmChunk();
+    unawaited(_feedNextPcmChunk());
   }
 
   /// Prepares playback for a realtime call before [startTranslationStream] (optional).

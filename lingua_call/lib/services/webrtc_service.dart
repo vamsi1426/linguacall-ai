@@ -217,16 +217,20 @@ class WebRtcService {
     var rxLog = 0;
     channel.onMessage = (RTCDataChannelMessage message) {
       if (!message.isBinary) return;
-      final bytes = message.binary;
-      final parsed = _parseDcPcmMessage(bytes);
-      if (rxLog < 12 || rxLog % 50 == 0) {
-        debugPrint(
-          'WebRtcService: received PCM from peer (${bytes.length} b, sr=${parsed.rate}, '
-          'pcm=${parsed.pcm.length} b, framed=${parsed.framed})',
-        );
+      try {
+        final bytes = message.binary;
+        final parsed = _parseDcPcmMessage(bytes);
+        if (rxLog < 12 || rxLog % 50 == 0) {
+          debugPrint(
+            'WebRtcService: received PCM from peer (${bytes.length} b, sr=${parsed.rate}, '
+            'pcm=${parsed.pcm.length} b, framed=${parsed.framed})',
+          );
+        }
+        rxLog++;
+        onRemotePcm?.call(parsed.pcm, parsed.rate);
+      } catch (e, st) {
+        debugPrint('WebRtcService: onMessage parse/callback error: $e\n$st');
       }
-      rxLog++;
-      onRemotePcm?.call(parsed.pcm, parsed.rate);
     };
   }
 
@@ -268,8 +272,12 @@ class _ParsedDcPcm {
 }
 
 /// Framed: 4 bytes uint32-LE sample rate + PCM16 (even length). Legacy: raw PCM @ 16 kHz.
+///
+/// Require a minimum frame size so the first few bytes of legacy PCM are not mistaken
+/// for a sample-rate header (which would corrupt audio, not ICE — but keeps heuristics safe).
 _ParsedDcPcm _parseDcPcmMessage(Uint8List bytes) {
-  if (bytes.length >= _kDcPcmHeaderBytes + 2) {
+  const minFramedTotalBytes = 64; // 4-byte header + at least some real PCM
+  if (bytes.length >= minFramedTotalBytes) {
     final bd = ByteData.sublistView(bytes);
     final sr = bd.getUint32(0, Endian.little);
     final pcmLen = bytes.length - _kDcPcmHeaderBytes;
