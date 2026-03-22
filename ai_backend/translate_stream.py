@@ -21,6 +21,18 @@ from google_env import configure_google_application_credentials
 logger = logging.getLogger("linguacall.translate_stream")
 
 
+def _pcm16le_rms_norm(chunk: bytes) -> float:
+    """RMS normalized ~0..1 for PCM16 LE mono (detect silence vs speech)."""
+    if len(chunk) < 2:
+        return 0.0
+    n = len(chunk) // 2
+    s = 0.0
+    for i in range(0, len(chunk), 2):
+        v = int.from_bytes(chunk[i : i + 2], "little", signed=True)
+        s += v * v
+    return (s / max(n, 1)) ** 0.5 / 32768.0
+
+
 def _is_stt_max_stream_duration_error(exc: BaseException) -> bool:
     """Google STT ends each streaming RPC after ~305s; we must open a new session."""
     msg = str(exc).lower()
@@ -126,6 +138,14 @@ def _run_translation_worker(
         interim_results=True,
         single_utterance=False,
     )
+    logger.info(
+        "STT RecognitionConfig: encoding=LINEAR16 sample_rate_hertz=%s language_code=%s "
+        "audio_channel_count=%s interim_results=%s",
+        recognition_config.sample_rate_hertz,
+        recognition_config.language_code,
+        recognition_config.audio_channel_count,
+        streaming_config.interim_results,
+    )
 
     last_sent_at = 0.0
     last_sent_text = None  # type: Optional[str]
@@ -190,10 +210,12 @@ def _run_translation_worker(
             return
         parts = []
         for i, r in enumerate(response.results):
-            alt = r.alternatives[0].transcript if r.alternatives else ""
+            alt0 = r.alternatives[0] if r.alternatives else None
+            alt = alt0.transcript if alt0 else ""
+            conf = getattr(alt0, "confidence", None) if alt0 else None
             parts.append(
                 f"[{i}] final={getattr(r, 'is_final', False)!r} "
-                f"stab={getattr(r, 'stability', 0.0):.2f} {alt[:48]!r}"
+                f"stab={getattr(r, 'stability', 0.0):.2f} conf={conf!r} {alt[:48]!r}"
             )
         logger.info("STT response #%s: %s", idx, " | ".join(parts))
 
@@ -424,8 +446,20 @@ async def translate_stream_websocket(websocket: WebSocket) -> None:
             if pcm_stats["received"] == 1 and no_pcm_warn_task is not None and not no_pcm_warn_task.done():
                 no_pcm_warn_task.cancel()
             n = pcm_stats["received"]
+            rms = _pcm16le_rms_norm(pcm_chunk)
             if n <= 3 or n % 100 == 0:
-                logger.info("Received PCM chunk #%s size=%s", n, len(pcm_chunk))
+                logger.info(
+                    "Received PCM chunk #%s size=%s rms=%.6f",
+                    n,
+                    len(pcm_chunk),
+                    rms,
+                )
+            if rms < 0.002 and (n <= 3 or n % 100 == 0):
+                logger.warning(
+                    "PCM chunk #%s: very low energy (rms=%.6f) — possible silence or wrong gain",
+                    n,
+                    rms,
+                )
             try:
                 pcm_queue.put_nowait(pcm_chunk)
             except queue.Full:

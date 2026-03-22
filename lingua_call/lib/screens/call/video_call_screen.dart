@@ -231,7 +231,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                               final line = err != null && err.isNotEmpty
                                   ? (err.length > 120 ? '${err.substring(0, 117)}...' : err)
                                   : translation.isStreaming
-                                      ? 'Translating… (this phone speaker)'
+                                      ? (translation.showNoSpeechHint
+                                          ? 'No speech detected — check mic'
+                                          : 'Translating… (this phone speaker)')
                                       : translation.isTranslationConnecting
                                           ? 'Connecting to translation server…'
                                           : 'Idle — backend must be reachable';
@@ -240,9 +242,12 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                                 style: TextStyle(
                                   color: err != null && err.isNotEmpty
                                       ? Colors.orangeAccent
-                                      : translation.isStreaming
-                                          ? AppTheme.secondaryColor
-                                          : AppTheme.textMuted,
+                                      : translation.isStreaming &&
+                                              translation.showNoSpeechHint
+                                          ? Colors.amberAccent
+                                          : translation.isStreaming
+                                              ? AppTheme.secondaryColor
+                                              : AppTheme.textMuted,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                 ),

@@ -84,4 +84,12 @@ class AppConfig {
       'wsTimeout=${translationWsTimeoutSec}s wsRetries=$translationWsRetries',
     );
   }
+
+  /// `voice_communication` (default), `voice_recognition`, `default`, or `mic` — [MicStream] source.
+  static const String micAudioSource =
+      String.fromEnvironment('LINGUA_MIC_SOURCE', defaultValue: 'voice_communication');
+
+  /// Play a quiet copy of mic PCM to the local speaker (use **headphones** to avoid feedback).
+  static const bool debugMicLoopback =
+      bool.fromEnvironment('LINGUA_DEBUG_MIC_LOOPBACK', defaultValue: false);
 }

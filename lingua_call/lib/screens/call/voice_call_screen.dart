@@ -287,7 +287,12 @@ class _VoiceCallScreenState extends State<VoiceCallScreen> {
                                 if (!_translationEnabled) {
                                   line = 'Translation OFF — turn the switch on to translate';
                                 } else if (translation.isStreaming) {
-                                  line = 'Translating… (remote peer hears translated audio)';
+                                  if (translation.showNoSpeechHint) {
+                                    line =
+                                        'No speech detected — speak louder or check mic (see logcat rms)';
+                                  } else {
+                                    line = 'Translating… (remote peer hears translated audio)';
+                                  }
                                 } else if (translation.isTranslationConnecting) {
                                   line =
                                       'Connecting to translation server… (first connect can take 30–60s after cold start)';
@@ -295,7 +300,9 @@ class _VoiceCallScreenState extends State<VoiceCallScreen> {
                                   line = 'Translation idle — check toggle or error above';
                                 }
                               } else if (translation.isStreaming) {
-                                line = 'Translating… (listen on this phone’s speaker)';
+                                line = translation.showNoSpeechHint
+                                    ? 'No speech detected — speak louder or check mic'
+                                    : 'Translating… (listen on this phone’s speaker)';
                               } else {
                                 line = 'Idle — enable translation & speak after backend connects';
                               }
@@ -305,9 +312,12 @@ class _VoiceCallScreenState extends State<VoiceCallScreen> {
                                 style: TextStyle(
                                   color: hasErr
                                       ? Colors.orangeAccent
-                                      : translation.isStreaming
-                                          ? AppTheme.secondaryColor
-                                          : AppTheme.textMuted,
+                                      : translation.isStreaming &&
+                                              translation.showNoSpeechHint
+                                          ? Colors.amberAccent
+                                          : translation.isStreaming
+                                              ? AppTheme.secondaryColor
+                                              : AppTheme.textMuted,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                 ),

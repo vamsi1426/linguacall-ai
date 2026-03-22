@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:math' as math;
 // Uint8List is re-exported by flutter/foundation.dart, so we don't need dart:typed_data here.
 
 import 'package:audio_session/audio_session.dart';
@@ -35,9 +36,19 @@ class AITranslationService extends ChangeNotifier {
   Future<void> _translationStartChain = Future<void>.value();
 
   Timer? _pcmWatchdog;
+  Timer? _noSpeechUiTimer;
+  DateTime? _streamingSince;
 
   bool _isStreaming = false;
   bool get isStreaming => _isStreaming;
+
+  /// True when streaming but no translated WAV received for [>= 3s] (STT silence / pipeline idle).
+  bool get showNoSpeechHint {
+    if (!_isStreaming || _receivedChunkCount > 0) return false;
+    final t = _streamingSince;
+    if (t == null) return false;
+    return DateTime.now().difference(t) >= const Duration(seconds: 3);
+  }
 
   /// True while opening websocket / setting up mic (before [_isStreaming] is true).
   bool _translationConnecting = false;
@@ -64,6 +75,45 @@ class AITranslationService extends ChangeNotifier {
   // Microphone PCM chunking.
   final List<int> _micBuffer = <int>[];
   int get _chunkBytes => (_sampleRate * _chunkDuration.inMilliseconds ~/ 1000) * _bytesPerSample;
+
+  /// RMS 0..~1 for PCM16 LE mono (diagnose silence vs speech).
+  static double _pcm16LeRms(Uint8List pcm) {
+    if (pcm.length < 2) return 0;
+    final n = pcm.length ~/ 2;
+    var sum = 0.0;
+    for (var i = 0; i < pcm.length; i += 2) {
+      var v = pcm[i] | (pcm[i + 1] << 8);
+      if (v & 0x8000 != 0) v = v - 0x10000;
+      sum += v * v;
+    }
+    return math.sqrt(sum / n) / 32768.0;
+  }
+
+  static Uint8List _attenuatePcm16(Uint8List pcm, double gain) {
+    final out = Uint8List(pcm.length);
+    for (var i = 0; i < pcm.length; i += 2) {
+      var v = pcm[i] | (pcm[i + 1] << 8);
+      if (v & 0x8000 != 0) v = v - 0x10000;
+      v = (v * gain).round().clamp(-32768, 32767);
+      out[i] = v & 0xff;
+      out[i + 1] = (v >> 8) & 0xff;
+    }
+    return out;
+  }
+
+  AudioSource _micSourceFromConfig() {
+    switch (AppConfig.micAudioSource.toLowerCase()) {
+      case 'default':
+        return AudioSource.DEFAULT;
+      case 'mic':
+        return AudioSource.MIC;
+      case 'voice_recognition':
+        return AudioSource.VOICE_RECOGNITION;
+      case 'voice_communication':
+      default:
+        return AudioSource.VOICE_COMMUNICATION;
+    }
+  }
 
   /// Connects to the first reachable translation WebSocket URL with retries per URL.
   Future<WebSocket?> _openTranslationWebSocket() async {
@@ -245,6 +295,10 @@ class AITranslationService extends ChangeNotifier {
           _pcmQueue.add(decoded.pcmBytes);
         }
         _receivedChunkCount++;
+        if (_receivedChunkCount == 1) {
+          _noSpeechUiTimer?.cancel();
+          _noSpeechUiTimer = null;
+        }
         if (_receivedChunkCount <= 5 || _receivedChunkCount % 10 == 0) {
           debugPrint(
             'AITranslationService: received translated audio chunk #$_receivedChunkCount '
@@ -305,6 +359,17 @@ class AITranslationService extends ChangeNotifier {
 
     // Mark streaming before mic chunks arrive.
     _isStreaming = true;
+    _streamingSince = DateTime.now();
+    _noSpeechUiTimer?.cancel();
+    _noSpeechUiTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!_isStreaming) {
+        _noSpeechUiTimer?.cancel();
+        return;
+      }
+      if (_receivedChunkCount == 0) {
+        notifyListeners();
+      }
+    });
     notifyListeners();
 
     var pcmChunksSent = 0;
@@ -320,8 +385,13 @@ class AITranslationService extends ChangeNotifier {
     });
 
     try {
+      final micSource = _micSourceFromConfig();
+      debugPrint(
+        'AITranslationService: MicStream config: ${_sampleRate}Hz PCM16 LE mono, '
+        'AudioSource=$micSource (LINGUA_MIC_SOURCE=${AppConfig.micAudioSource})',
+      );
       _micSubscription = MicStream.microphone(
-        audioSource: AudioSource.DEFAULT,
+        audioSource: micSource,
         sampleRate: _sampleRate,
         channelConfig: ChannelConfig.CHANNEL_IN_MONO,
         audioFormat: AudioFormat.ENCODING_PCM_16BIT,
@@ -337,10 +407,22 @@ class AITranslationService extends ChangeNotifier {
             final out = Uint8List.fromList(_micBuffer.sublist(0, _chunkBytes));
             _micBuffer.removeRange(0, _chunkBytes);
             pcmChunksSent++;
-            if (pcmChunksSent <= 3 || pcmChunksSent % 50 == 0) {
+            final rms = _pcm16LeRms(out);
+            if (pcmChunksSent <= 5 || pcmChunksSent % 50 == 0) {
               debugPrint(
-                'AITranslationService: sending PCM chunk #$pcmChunksSent (${out.length} bytes)',
+                'AITranslationService: sending PCM chunk #$pcmChunksSent '
+                '(${out.length} bytes) rms=${rms.toStringAsFixed(5)}',
               );
+            }
+            if (rms < 0.002 && (pcmChunksSent <= 8 || pcmChunksSent % 50 == 0)) {
+              debugPrint(
+                'AITranslationService: WARNING: mic chunk #$pcmChunksSent looks like silence '
+                '(rms < 0.002) — check routing / gain / LINGUA_MIC_SOURCE',
+              );
+            }
+            if (AppConfig.debugMicLoopback && _playbackActive) {
+              _pcmQueue.add(_attenuatePcm16(out, 0.2));
+              unawaited(_feedNextPcmChunk());
             }
             _webSocket?.add(out);
           }
@@ -352,7 +434,7 @@ class AITranslationService extends ChangeNotifier {
           await stopTranslationStream();
         },
       );
-      debugPrint('AITranslationService: mic stream started (subscription active)');
+      debugPrint('AITranslationService: mic stream START (subscription active, WebRTC does not open mic)');
     } catch (e, st) {
       debugPrint('AITranslationService: mic stream start FAILED: $e\n$st');
       _lastError = 'Could not start microphone capture: $e';
@@ -371,6 +453,9 @@ class AITranslationService extends ChangeNotifier {
 
     _pcmWatchdog?.cancel();
     _pcmWatchdog = null;
+    _noSpeechUiTimer?.cancel();
+    _noSpeechUiTimer = null;
+    _streamingSince = null;
 
     _translationConnecting = false;
     _isStreaming = false;
@@ -380,6 +465,7 @@ class AITranslationService extends ChangeNotifier {
 
     await _micSubscription?.cancel();
     _micSubscription = null;
+    debugPrint('AITranslationService: mic stream STOP');
 
     try {
       await _wsSubscription?.cancel();
@@ -452,17 +538,19 @@ class AITranslationService extends ChangeNotifier {
       final session = await AudioSession.instance;
       await session.configure(
         const AudioSessionConfiguration(
-          avAudioSessionCategory: AVAudioSessionCategory.playback,
+          avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
           avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.mixWithOthers,
           androidAudioAttributes: AndroidAudioAttributes(
             contentType: AndroidAudioContentType.speech,
-            usage: AndroidAudioUsage.media,
+            usage: AndroidAudioUsage.voiceCommunication,
           ),
           androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
         ),
       );
       await session.setActive(true);
-      debugPrint('AITranslationService: audio session configured (media/speech)');
+      debugPrint(
+        'AITranslationService: audio session playAndRecord + voiceCommunication (mic + speaker)',
+      );
     } catch (e, st) {
       debugPrint('AITranslationService: audio session configure failed: $e\n$st');
     }

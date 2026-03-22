@@ -66,6 +66,9 @@ class WebRtcService {
         {'DtlsSrtpKeyAgreement': true},
       ],
     });
+    debugPrint(
+      'WebRtcService: peer connection created — mic not opened here (MicStream in AITranslationService)',
+    );
 
     _pc!.onIceCandidate = (RTCIceCandidate candidate) {
       onIceCandidate?.call(candidate);

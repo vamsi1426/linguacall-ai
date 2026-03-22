@@ -168,7 +168,9 @@ class RealtimeCallCoordinator extends ChangeNotifier {
     if (_translationRunning) return;
     _translationRunning = true;
 
-    debugPrint('Realtime: starting translation');
+    debugPrint(
+      'Realtime: starting translation (WebRTC does not capture mic; MicStream only, webRtcMicActive=false)',
+    );
     const retryDelay = Duration(seconds: 3);
     for (var attempt = 1; attempt <= 2; attempt++) {
       try {
